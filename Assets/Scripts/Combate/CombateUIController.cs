@@ -49,6 +49,8 @@ public sealed class CombateUIController : MonoBehaviour
     private bool turnoDeIren = true;
     private bool combateTerminado;
     private bool resolviendoAcciones;
+    private const int MaxEntradasHistorial = 5;
+    private readonly List<string> historialAcciones = new List<string>();
 
     private void Awake()
     {
@@ -60,7 +62,7 @@ public sealed class CombateUIController : MonoBehaviour
         vidaEnemigoTexto = Obtener<TMP_Text>("EnemyCard/EnemyHP");
         vidaEnemigoRelleno = Obtener<Image>("EnemyCard/EnemyBar/Fill");
         turnoTexto = Obtener<TMP_Text>("EnemyCard/TurnText");
-        registroTexto = Obtener<TMP_Text>("BattlePanel/ActionPanel/CombatLog");
+        registroTexto = Obtener<TMP_Text>("CombatHistory/CombatLog");
         menuComandos = Obtener<Transform>("BattlePanel/ActionPanel/Commands")?.gameObject;
         menuAtaques = Obtener<Transform>("BattlePanel/ActionPanel/Attacks")?.gameObject;
         menuInventario = Obtener<Transform>("BattlePanel/ActionPanel/Inventory")?.gameObject;
@@ -92,7 +94,8 @@ public sealed class CombateUIController : MonoBehaviour
             return;
         }
         ActualizarEstado();
-        EscribirRegistro("El acechador bloquea el camino.");
+        historialAcciones.Clear();
+        EscribirRegistro("El Acechador bloquea el camino.");
         MostrarComandos();
     }
 
@@ -252,7 +255,7 @@ public sealed class CombateUIController : MonoBehaviour
         string accion = $"{personaje.Nombre} usa {nombreAtaque}: {dano} de daño.";
         if (enemigo.Vida <= 0)
         {
-            EscribirRegistro(accion + " El acechador cae.");
+            EscribirRegistro(accion + " El Acechador cae.");
             TerminarCombate(true);
             return;
         }
@@ -305,7 +308,7 @@ public sealed class CombateUIController : MonoBehaviour
         AccionEnemigaPendiente pendiente = enemigo.PrepararAccion(objetivos, defensa ? personaje : null);
         if (pendiente.objetivo == null)
         {
-            EscribirRegistro($"{accion}\n{enemigo.Nombre} no encuentra un objetivo.");
+            EscribirRegistro($"{enemigo.Nombre} no encuentra un objetivo.");
             turno++;
             ActualizarEstado();
             resolviendoAcciones = false;
@@ -314,18 +317,18 @@ public sealed class CombateUIController : MonoBehaviour
         }
 
         if (turnoTexto != null) turnoTexto.text = $"TURNO {turno:00} · ¡{enemigo.Nombre.ToUpperInvariant()} ATACA!";
-        EscribirRegistro($"{accion}\n¡{enemigo.Nombre} prepara {pendiente.nombreAtaque} contra {pendiente.objetivo.Nombre}!\nVa a atacar...");
+        EscribirRegistro($"¡{enemigo.Nombre} prepara {pendiente.nombreAtaque} contra {pendiente.objetivo.Nombre}!");
         yield return new WaitForSeconds(pausaDePreparacion);
 
         ResultadoAccionEnemiga resultado = enemigo.EjecutarAccion(pendiente);
-        turno++;
         ActualizarEstado();
         BloquearBotones(true);
         if (turnoTexto != null) turnoTexto.text = $"TURNO {turno - 1:00} · IMPACTO EN {pendiente.objetivo.Nombre.ToUpperInvariant()}";
         if (resultado.objetivo != null)
-            EscribirRegistro($"{enemigo.Nombre} usa {resultado.nombreAtaque} contra {resultado.objetivo.Nombre}: ¡pierde {resultado.dano} PV!{(resultado.objetivoDefendido ? " (daño reducido por defensa)" : "")}");
+            EscribirRegistro($"{enemigo.Nombre} usa {resultado.nombreAtaque} contra {resultado.objetivo.Nombre}: pierde {resultado.dano} PV{(resultado.objetivoDefendido ? " (mitad por defensa)" : "")}.");
         else
             EscribirRegistro($"{enemigo.Nombre} intenta atacar, pero ya no encuentra un objetivo.");
+        turno++;
 
         if (TodosLosPersonajesDerrotados(objetivos))
         {
@@ -393,6 +396,7 @@ public sealed class CombateUIController : MonoBehaviour
             mensajeFinalTexto.text = victoria
                 ? $"El acechador cae. {personaje.Nombre} conserva {personaje.Vida} PV y {personaje.Mana} PM."
                 : $"{personaje.Nombre} ha caído. La senda vuelve al silencio.";
+        EscribirRegistro(victoria ? "Fin del combate: victoria." : "Fin del combate: derrota.");
         if (panelFinal != null) panelFinal.SetActive(true);
         ConfigurarSeleccion(botonReiniciar);
     }
@@ -406,14 +410,21 @@ public sealed class CombateUIController : MonoBehaviour
         turnoDeIren = true;
         resolviendoAcciones = false;
         if (panelFinal != null) panelFinal.SetActive(false);
-        EscribirRegistro("El acechador bloquea el camino.");
+        historialAcciones.Clear();
+        EscribirRegistro("El Acechador bloquea el camino.");
         ActualizarEstado();
         MostrarComandos();
     }
 
     private void EscribirRegistro(string mensaje)
     {
-        if (registroTexto != null) registroTexto.text = mensaje;
+        if (string.IsNullOrWhiteSpace(mensaje)) return;
+        string entrada = $"T{turno:00}  {mensaje.Replace("\n", " ")}";
+        historialAcciones.Add(entrada);
+        while (historialAcciones.Count > MaxEntradasHistorial)
+            historialAcciones.RemoveAt(0);
+        if (registroTexto != null)
+            registroTexto.text = string.Join("\n", historialAcciones);
     }
 
     private bool PuedeActuar() => !combateTerminado && turnoDeIren && personaje != null;

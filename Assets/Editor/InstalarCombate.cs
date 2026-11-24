@@ -12,7 +12,8 @@ using UnityEngine.UI;
 public static class InstalarCombate
 {
     private const string RutaEscena = "Assets/Scenes/Combate.unity";
-    private const string SolicitudUnicaRelativa = "../Temp/restore/InstalarEnemigo.once";
+    private const string SolicitudUnicaRelativa = "../Temp/restore/InstalarHistorialDoctor.once";
+    private const string RutaPrefabDoctor = "Assets/Polytope Studio/Lowpoly_Characters/Prefabs/PT_Plague_Doctor.prefab";
 
     private static readonly Color Ink = new Color32(17, 19, 22, 242);
     private static readonly Color Card = new Color32(37, 39, 42, 245);
@@ -62,19 +63,25 @@ public static class InstalarCombate
         if (TMP_Settings.defaultFontAsset == null)
             TMP_PackageResourceImporter.ImportResources(true, false, false);
 
-        GameObject jugador = BuscarObjeto(scene, "Personaje");
+        GameObject jugador = BuscarObjeto(scene, "DOCTOR") ?? BuscarObjeto(scene, "Personaje");
         if (jugador == null)
             throw new InvalidOperationException("No se encontró Personaje en Assets/Scenes/Combate.unity.");
 
         PersonajeCombate datos = jugador.GetComponent<PersonajeCombate>();
         if (datos == null)
             datos = Undo.AddComponent<PersonajeCombate>(jugador);
+        jugador.name = "DOCTOR";
+        SerializedObject datosSerializados = new SerializedObject(datos);
+        datosSerializados.FindProperty("nombre").stringValue = "DOCTOR";
+        datosSerializados.ApplyModifiedPropertiesWithoutUndo();
 
         GameObject enemigo = BuscarObjeto(scene, "Enemigo");
         if (enemigo == null)
             throw new InvalidOperationException("No se encontró Enemigo en Assets/Scenes/Combate.unity.");
         if (enemigo.GetComponent<EnemigoCombate>() == null)
             Undo.AddComponent<EnemigoCombate>(enemigo);
+
+        PrepararModeloDoctor(jugador, enemigo, scene);
 
         GameObject antiguo = BuscarObjeto(scene, "CombateUI");
         GameObject canvas = BuscarObjeto(scene, "CombateCanvas");
@@ -100,6 +107,46 @@ public static class InstalarCombate
         EditorSceneManager.MarkSceneDirty(scene);
         if (!EditorSceneManager.SaveScene(scene))
             throw new InvalidOperationException("Unity no pudo guardar Assets/Scenes/Combate.unity.");
+    }
+
+    private static void PrepararModeloDoctor(GameObject jugador, GameObject enemigo, Scene scene)
+    {
+        GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(RutaPrefabDoctor);
+        if (prefab == null)
+            throw new InvalidOperationException($"No se encontró el prefab del modelo: {RutaPrefabDoctor}");
+
+        Transform existente = jugador.transform.Find("DoctorModel");
+        if (existente != null)
+            Undo.DestroyObjectImmediate(existente.gameObject);
+
+        GameObject modelo = PrefabUtility.InstantiatePrefab(prefab, scene) as GameObject;
+        if (modelo == null)
+            throw new InvalidOperationException("Unity no pudo crear una instancia del prefab PT_Plague_Doctor.");
+        Undo.RegisterCreatedObjectUndo(modelo, "Asignar modelo Plague Doctor a DOCTOR");
+        modelo.name = "DoctorModel";
+        modelo.transform.SetParent(jugador.transform, false);
+
+        GameObject suelo = BuscarObjeto(scene, "Cube");
+        float alturaSuelo = suelo != null && suelo.GetComponent<Renderer>() != null
+            ? suelo.GetComponent<Renderer>().bounds.max.y
+            : 0f;
+        Vector3 posMundoSuelo = new Vector3(jugador.transform.position.x, alturaSuelo, jugador.transform.position.z);
+        modelo.transform.localPosition = jugador.transform.InverseTransformPoint(posMundoSuelo);
+
+        Vector3 direccion = enemigo.transform.position - jugador.transform.position;
+        direccion.y = 0f;
+        modelo.transform.localRotation = direccion.sqrMagnitude > 0.001f
+            ? Quaternion.Inverse(jugador.transform.rotation) * Quaternion.LookRotation(direccion.normalized, Vector3.up)
+            : Quaternion.identity;
+
+        Vector3 escalaPadre = jugador.transform.lossyScale;
+        modelo.transform.localScale = new Vector3(
+            2.5f / Mathf.Max(0.001f, escalaPadre.x),
+            2.5f / Mathf.Max(0.001f, escalaPadre.y),
+            2.5f / Mathf.Max(0.001f, escalaPadre.z));
+
+        MeshRenderer cuboPrueba = jugador.GetComponent<MeshRenderer>();
+        if (cuboPrueba != null) cuboPrueba.enabled = false;
     }
 
     private static void PrepararCanvas(GameObject canvasObject)
@@ -141,6 +188,7 @@ public static class InstalarCombate
         EliminarHijo(canvas, "LocationLabel");
         EliminarHijo(canvas, "EncounterLabel");
         EliminarHijo(canvas, "EnemyCard");
+        EliminarHijo(canvas, "CombatHistory");
         EliminarHijo(canvas, "BattlePanel");
         EliminarHijo(canvas, "EndPanel");
 
@@ -152,8 +200,21 @@ public static class InstalarCombate
             new Vector2(0, 1), new Vector2(0, 1), new Vector2(32, -53), new Vector2(620, 22));
 
         BuildEnemyCard(screen);
+        BuildCombatHistory(screen);
         BuildBattlePanel(screen, personaje);
         BuildEndPanel(screen);
+    }
+
+    private static void BuildCombatHistory(RectTransform screen)
+    {
+        RectTransform history = CreatePanel("CombatHistory", screen, Ink,
+            new Vector2(0, 1), new Vector2(0, 1), new Vector2(30, -82), new Vector2(600, 156));
+        CreateText("HistoryTitle", history, "HISTORIAL DEL COMBATE", 13, Gold, TextAlignmentOptions.Left,
+            new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, -10), new Vector2(-28, 22), true);
+        TMP_Text entries = CreateText("CombatLog", history, "El Acechador bloquea el camino.", 13, MainText,
+            TextAlignmentOptions.TopLeft, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, -38), new Vector2(-28, 106));
+        entries.enableWordWrapping = true;
+        entries.overflowMode = TextOverflowModes.Truncate;
     }
 
     private static void BuildEnemyCard(RectTransform screen)
@@ -187,10 +248,8 @@ public static class InstalarCombate
         actionPanel.offsetMin = new Vector2(838, 12);
         actionPanel.offsetMax = new Vector2(-12, -12);
 
-        CreateText("CommandTitle", actionPanel, "¿QUÉ HARÁ IREN?", 15, Gold, TextAlignmentOptions.Left,
+        CreateText("CommandTitle", actionPanel, "¿QUÉ HARÁ DOCTOR?", 15, Gold, TextAlignmentOptions.Left,
             new Vector2(0, 1), new Vector2(1, 1), new Vector2(16, -10), new Vector2(-32, 22), true);
-        CreateText("CombatLog", actionPanel, "El acechador bloquea el camino.", 12, SubText, TextAlignmentOptions.Left,
-            new Vector2(0, 1), new Vector2(1, 1), new Vector2(16, -35), new Vector2(-32, 22));
 
         RectTransform commands = CreatePanel("Commands", actionPanel, new Color(0, 0, 0, 0),
             new Vector2(0, 0), new Vector2(1, 1), Vector2.zero, Vector2.zero);

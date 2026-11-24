@@ -4,7 +4,7 @@ using UnityEngine;
 public sealed class PersonajeCombate : MonoBehaviour
 {
     [Header("Personaje")]
-    [SerializeField] private string nombre = "Iren";
+    [SerializeField] private string nombre = "DOCTOR";
     [SerializeField, Min(1)] private int vidaMaxima = 36;
     [SerializeField, Min(0)] private int manaMaximo = 24;
     [SerializeField, Min(0)] private int vidaInicial = 36;
