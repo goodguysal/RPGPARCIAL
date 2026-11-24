@@ -73,7 +73,7 @@ public static class InstalarCura
             SerializedObject serialized = new SerializedObject(estado);
             serialized.FindProperty("nombre").stringValue = "CURA";
             serialized.FindProperty("esCura").boolValue = true;
-            serialized.FindProperty("iniciativa").intValue = 8;
+            serialized.FindProperty("velocidadATB").floatValue = 10f;
             serialized.ApplyModifiedProperties();
             EditorUtility.SetDirty(estado);
 

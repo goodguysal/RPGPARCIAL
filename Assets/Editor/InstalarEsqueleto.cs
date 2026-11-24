@@ -105,7 +105,7 @@ public static class InstalarEsqueleto
         so.FindProperty("vidaInicial").intValue = 40;
         so.FindProperty("manaMaximo").intValue = 30;
         so.FindProperty("manaInicial").intValue = 24;
-        so.FindProperty("iniciativa").intValue = 18;
+        so.FindProperty("velocidadATB").floatValue = 14f;
         so.FindProperty("esCura").boolValue = false;
         so.FindProperty("esEsqueleto").boolValue = true;
         so.ApplyModifiedProperties();

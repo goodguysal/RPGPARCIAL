@@ -9,7 +9,7 @@ public sealed class PersonajeCombate : MonoBehaviour
     [SerializeField, Min(0)] private int manaMaximo = 24;
     [SerializeField, Min(0)] private int vidaInicial = 36;
     [SerializeField, Min(0)] private int manaInicial = 18;
-    [SerializeField, Min(0)] private int iniciativa = 12;
+    [SerializeField, Min(1f)] private float velocidadATB = 12f;
     [SerializeField] private int vendasIniciales = 1;
     [SerializeField] private int tonicosIniciales = 1;
     [SerializeField] private bool esCura;
@@ -25,7 +25,7 @@ public sealed class PersonajeCombate : MonoBehaviour
     public int ManaMaximo => manaMaximo;
     public int VidaInicial => Mathf.Clamp(vidaInicial, 0, vidaMaxima);
     public int ManaInicial => Mathf.Clamp(manaInicial, 0, manaMaximo);
-    public int Iniciativa => iniciativa;
+
     public int Vida { get; private set; }
     public int Mana { get; private set; }
     public int Vendas { get; private set; }
@@ -40,6 +40,10 @@ public sealed class PersonajeCombate : MonoBehaviour
     public int CostoCuracionDoctor => costoCuracionDoctor;
     public int CantidadCuracionDoctor => cantidadCuracionDoctor;
     public int CostoAtaquePesadoEsqueleto => costoAtaquePesadoEsqueleto;
+    public float ATB { get; private set; }
+    public float VelocidadATB => Mathf.Max(1f, velocidadATB);
+    public float PorcentajeATB => Mathf.Clamp01(ATB / 100f);
+    public bool ListoParaActuar => Vida > 0 && ATB >= 100f;
 
     private Animator animator;
     private static readonly int AtaqueTrigger = Animator.StringToHash("Attack");
@@ -63,6 +67,7 @@ public sealed class PersonajeCombate : MonoBehaviour
         Vida = Mathf.Clamp(vidaInicial, 0, vidaMaxima);
         Mana = Mathf.Clamp(manaInicial, 0, manaMaximo);
         ContraataquePreparado = false;
+        ATB = 0f;
         Vendas = Mathf.Max(0, vendasIniciales);
         Tonicos = Mathf.Max(0, tonicosIniciales);
         if (animator != null && animator.runtimeAnimatorController != null)
@@ -140,6 +145,7 @@ public sealed class PersonajeCombate : MonoBehaviour
         if (Vida == 0)
         {
             ContraataquePreparado = false;
+            ATB = 0f;
             if (animator != null) animator.ResetTrigger(GolpeTrigger);
             ActivarAnimacion(MuerteTrigger);
         }
@@ -181,7 +187,9 @@ public sealed class PersonajeCombate : MonoBehaviour
         Mana -= costoRegenerarMana;
         manaRecuperado = objetivo.RecuperarMana(cantidadRegenerarMana);
         if (manaRecuperado > 0)
+        {
             ActivarAnimacion(HealTrigger);
+        }
         return manaRecuperado > 0;
     }
 
@@ -205,6 +213,22 @@ public sealed class PersonajeCombate : MonoBehaviour
         return vidaRecuperada > 0;
     }
 
+    public void AvanzarATB(float deltaTiempo)
+    {
+        if (Vida <= 0 || ATB >= 100f) return;
+        ATB = Mathf.Min(100f, ATB + VelocidadATB * Mathf.Max(0f, deltaTiempo));
+    }
+
+    public void ConsumirATB(float costoRecuperacion)
+    {
+        ATB = Mathf.Max(0f, ATB - Mathf.Max(0f, costoRecuperacion));
+    }
+
+    public void AcelerarATB(float cantidad)
+    {
+        if (Vida <= 0) return;
+        ATB = Mathf.Min(100f, ATB + Mathf.Max(0f, cantidad));
+    }
     public int RecuperarVida(int cantidad)
     {
         int vidaAnterior = Vida;

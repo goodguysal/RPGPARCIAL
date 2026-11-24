@@ -1,6 +1,7 @@
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.Serialization;
 
 /// <summary>Vista reutilizable con la información de un integrante del grupo.</summary>
 public sealed class PersonajeCardUI : MonoBehaviour
@@ -10,10 +11,15 @@ public sealed class PersonajeCardUI : MonoBehaviour
     [SerializeField] private TMP_Text nombreTexto;
     [SerializeField] private TMP_Text vidaTexto;
     [SerializeField] private TMP_Text manaTexto;
-    [SerializeField] private TMP_Text iniciativaTexto;
+    [FormerlySerializedAs("iniciativaTexto")]
+    [SerializeField] private TMP_Text velocidadATBTexto;
     [SerializeField] private Image vidaRelleno;
     [SerializeField] private Image manaRelleno;
 
+    [SerializeField] private Image atbRelleno;
+    private Slider atbSlider;
+    [SerializeField] private TMP_Text atbTexto;
+    private float atbObjetivo;
     private Slider vidaSlider;
     private Slider manaSlider;
     private TMP_Text indicadorObjetivo;
@@ -29,6 +35,12 @@ public sealed class PersonajeCardUI : MonoBehaviour
         valoresInicializados = false;
         vidaSlider = AsegurarSlider(vidaRelleno);
         manaSlider = AsegurarSlider(manaRelleno);
+        if (atbRelleno == null) atbRelleno = transform.Find("ATBBar/Fill")?.GetComponent<Image>();
+        if (atbTexto == null) atbTexto = transform.Find("ATBBar/ATBText")?.GetComponent<TMP_Text>();
+        if (atbRelleno != null && atbRelleno.transform.parent != null)
+        {
+            atbSlider = AsegurarATBSlider(atbRelleno);
+        }
         Actualizar();
     }
 
@@ -39,6 +51,8 @@ public sealed class PersonajeCardUI : MonoBehaviour
             vidaSlider.value = Mathf.MoveTowards(vidaSlider.value, vidaObjetivo, VelocidadAnimacion * Time.unscaledDeltaTime);
         if (manaSlider != null)
             manaSlider.value = Mathf.MoveTowards(manaSlider.value, manaObjetivo, VelocidadAnimacion * Time.unscaledDeltaTime);
+        if (atbSlider != null)
+            atbSlider.value = Mathf.MoveTowards(atbSlider.value, atbObjetivo * 100f, 150f * Time.unscaledDeltaTime);
     }
 
     private void OnValidate() => Actualizar();
@@ -49,6 +63,18 @@ public sealed class PersonajeCardUI : MonoBehaviour
         Actualizar();
     }
 
+    public void ActualizarATB(float porcentaje, bool listo)
+    {
+        atbObjetivo = Mathf.Clamp01(porcentaje);
+        if (atbTexto != null) atbTexto.text = listo ? "LISTO" : $"ATB {Mathf.RoundToInt(atbObjetivo * 100f)}%";
+        if (atbRelleno != null)
+        {
+            atbRelleno.color = listo
+                ? new Color(0.96f, 0.77f, 0.28f, 1f)
+                : new Color(0.35f, 0.72f, 0.79f, 1f);
+            if (!Application.isPlaying && atbSlider != null) atbSlider.SetValueWithoutNotify(atbObjetivo * 100f);
+        }
+    }
     public void MostrarIndicadorObjetivo(bool mostrar)
     {
         if (indicadorObjetivo == null && mostrar)
@@ -84,7 +110,7 @@ public sealed class PersonajeCardUI : MonoBehaviour
             Asignar(nombreTexto, nombreVacio);
             Asignar(vidaTexto, "PV   — / —");
             Asignar(manaTexto, "PM   — / —");
-            Asignar(iniciativaTexto, "INI   —");
+            Asignar(velocidadATBTexto, "VEL ATB   —");
             AsignarObjetivo(vidaSlider, 0f, ref vidaObjetivo);
             AsignarObjetivo(manaSlider, 0f, ref manaObjetivo);
             return;
@@ -95,7 +121,7 @@ public sealed class PersonajeCardUI : MonoBehaviour
         Asignar(nombreTexto, personaje.Nombre.ToUpperInvariant());
         Asignar(vidaTexto, $"PV   {vida} / {personaje.VidaMaxima}");
         Asignar(manaTexto, $"PM   {mana} / {personaje.ManaMaximo}");
-        Asignar(iniciativaTexto, $"INI   {personaje.Iniciativa:00}");
+        Asignar(velocidadATBTexto, $"VEL ATB   {personaje.VelocidadATB:0}");
 
         AsignarObjetivo(vidaSlider, Mathf.Clamp(vida, 0, personaje.VidaMaxima), ref vidaObjetivo);
         AsignarObjetivo(manaSlider, Mathf.Clamp(mana, 0, personaje.ManaMaximo), ref manaObjetivo);
@@ -112,6 +138,19 @@ public sealed class PersonajeCardUI : MonoBehaviour
         if (!Application.isPlaying || !valoresInicializados)
             slider.SetValueWithoutNotify(valor);
         valoresInicializados = true;
+    }
+
+    private static Slider AsegurarATBSlider(Image relleno)
+    {
+        if (relleno == null || relleno.transform.parent == null) return null;
+        Slider slider = relleno.transform.parent.GetComponent<Slider>();
+        if (slider == null) slider = relleno.transform.parent.gameObject.AddComponent<Slider>();
+        slider.minValue = 0f; slider.maxValue = 100f; slider.wholeNumbers = false;
+        slider.transition = Selectable.Transition.None; slider.interactable = false;
+        slider.navigation = new Navigation { mode = Navigation.Mode.None };
+        slider.handleRect = null; slider.targetGraphic = null; slider.fillRect = relleno.rectTransform;
+        relleno.type = Image.Type.Simple;
+        return slider;
     }
 
     private static Slider AsegurarSlider(Image relleno)

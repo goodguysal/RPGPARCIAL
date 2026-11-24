@@ -280,7 +280,7 @@ public static class InstalarCombate
 
         TMP_Text name = CreateText("Name", card, personaje != null ? personaje.Nombre.ToUpperInvariant() : placeholder,
             15, MainText, TextAlignmentOptions.Left, new Vector2(0, 1), new Vector2(0, 1), new Vector2(14, -12), new Vector2(156, 22), true);
-        TMP_Text initiative = CreateText("Initiative", card, personaje != null ? $"INI {personaje.Iniciativa:00}" : "INI  —",
+        TMP_Text initiative = CreateText("Initiative", card, personaje != null ? $"VEL ATB {personaje.VelocidadATB:00}" : "VEL ATB  —",
             12, Gold, TextAlignmentOptions.Right, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-12, -13), new Vector2(82, 20), true);
 
         TMP_Text hp = CreateText("HP", card, personaje != null ? $"PV   {personaje.VidaInicial} / {personaje.VidaMaxima}" : "PV   — / —",
@@ -297,7 +297,7 @@ public static class InstalarCombate
         serializedView.FindProperty("nombreTexto").objectReferenceValue = name;
         serializedView.FindProperty("vidaTexto").objectReferenceValue = hp;
         serializedView.FindProperty("manaTexto").objectReferenceValue = mp;
-        serializedView.FindProperty("iniciativaTexto").objectReferenceValue = initiative;
+        serializedView.FindProperty("velocidadATBTexto").objectReferenceValue = initiative;
         serializedView.FindProperty("vidaRelleno").objectReferenceValue = hpFill;
         serializedView.FindProperty("manaRelleno").objectReferenceValue = mpFill;
         serializedView.ApplyModifiedPropertiesWithoutUndo();

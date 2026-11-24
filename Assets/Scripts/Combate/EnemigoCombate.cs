@@ -9,6 +9,10 @@ public sealed class EnemigoCombate : MonoBehaviour
     [SerializeField] private string nombre = "GOLEM";
     [SerializeField, Min(1)] private int vidaMaxima = 180;
     [SerializeField, Min(0)] private int vidaInicial = 180;
+    [SerializeField, Min(0)] private int manaMaximo = 24;
+    [SerializeField, Min(0)] private int manaInicial = 18;
+    [SerializeField, Min(0)] private int costoEmbateMana = 4;
+    [SerializeField, Min(1f)] private float velocidadATB = 12f;
 
     [Header("Decisiones")]
     [SerializeField, Range(0f, 1f)] private float probabilidadGolpeFuerte = 0.25f;
@@ -22,6 +26,12 @@ public sealed class EnemigoCombate : MonoBehaviour
     public string Nombre => nombre;
     public int VidaMaxima => vidaMaxima;
     public int Vida { get; private set; }
+    public int ManaMaximo => manaMaximo;
+    public int Mana { get; private set; }
+    public float ATB { get; private set; }
+    public float VelocidadATB => Mathf.Max(1f, velocidadATB);
+    public float PorcentajeATB => Mathf.Clamp01(ATB / 100f);
+    public bool ListoParaActuar => Vida > 0 && ATB >= 100f;
 
     private Animator animator;
     private static readonly int AtaqueTrigger = Animator.StringToHash("Attack");
@@ -33,6 +43,8 @@ public sealed class EnemigoCombate : MonoBehaviour
     public void Reiniciar()
     {
         Vida = Mathf.Clamp(vidaInicial, 0, vidaMaxima);
+        Mana = Mathf.Clamp(manaInicial, 0, manaMaximo);
+        ATB = 0f;
         ObtenerAnimator();
         if (animator == null || animator.runtimeAnimatorController == null) return;
         animator.ResetTrigger(AtaqueTrigger);
@@ -40,6 +52,22 @@ public sealed class EnemigoCombate : MonoBehaviour
         animator.Play(EstadoIdle, 0, 0f);
     }
 
+    public void AvanzarATB(float deltaTiempo)
+    {
+        if (Vida <= 0 || ATB >= 100f) return;
+        ATB = Mathf.Min(100f, ATB + VelocidadATB * Mathf.Max(0f, deltaTiempo));
+    }
+
+    public void ConsumirATB(float costoRecuperacion)
+    {
+        ATB = Mathf.Max(0f, ATB - Mathf.Max(0f, costoRecuperacion));
+    }
+
+    public void AcelerarATB(float cantidad)
+    {
+        if (Vida <= 0) return;
+        ATB = Mathf.Min(100f, ATB + Mathf.Max(0f, cantidad));
+    }
     public void RecibirDano(int cantidad)
     {
         int dano = Mathf.Max(0, cantidad);
@@ -74,7 +102,13 @@ public sealed class EnemigoCombate : MonoBehaviour
         int dano = UnityEngine.Random.Range(ataque.danoMinimo, ataque.danoMaximo + 1);
         bool defendido = EstaProtegido(objetivo, objetivosProtegidos);
         if (defendido) dano = Mathf.CeilToInt(dano * 0.5f);
-        return new AccionEnemigaPendiente(ataque.nombre, objetivo, dano, defendido);
+        int costoMana = ataque.nombre == "Embate de turba" ? costoEmbateMana : 0;
+        if (Mana < costoMana)
+        {
+            ataque = ataques[0];
+            costoMana = 0;
+        }
+        return new AccionEnemigaPendiente(ataque.nombre, objetivo, dano, defendido, costoMana);
     }
 
     private static bool EstaProtegido(PersonajeCombate objetivo, ICollection<PersonajeCombate> protegidos)
@@ -89,6 +123,7 @@ public sealed class EnemigoCombate : MonoBehaviour
     {
         if (accion.objetivo == null || !accion.objetivo.isActiveAndEnabled || accion.objetivo.Vida <= 0)
             return default;
+        Mana = Mathf.Max(0, Mana - accion.costoMana);
         ActivarAnimacion(AtaqueTrigger);
         if (accion.objetivo.BloquearYDevolverGolpe(accion.dano, out int danoDevuelto))
         {
@@ -130,9 +165,11 @@ public sealed class EnemigoCombate : MonoBehaviour
         if (ataques.Length == 1) return ataques[0];
         float vidaProporcional = vidaMaxima <= 0 ? 1f : (float)Vida / vidaMaxima;
         float probabilidad = vidaProporcional <= 0.5f ? probabilidadGolpeFuerteHerido : probabilidadGolpeFuerte;
-        return UnityEngine.Random.value < probabilidad ? ataques[1] : ataques[0];
+        AtaqueEnemigo elegido = UnityEngine.Random.value < probabilidad ? ataques[1] : ataques[0];
+        if (elegido.nombre == "Embate de turba" && Mana < costoEmbateMana)
+            return ataques[0];
+        return elegido;
     }
-
     [Serializable]
     private struct AtaqueEnemigo
     {
@@ -150,10 +187,16 @@ public readonly struct AccionEnemigaPendiente
     public readonly PersonajeCombate objetivo;
     public readonly int dano;
     public readonly bool objetivoDefendido;
-    public AccionEnemigaPendiente(string nombreAtaque, PersonajeCombate objetivo, int dano, bool objetivoDefendido)
-    { this.nombreAtaque = nombreAtaque; this.objetivo = objetivo; this.dano = dano; this.objetivoDefendido = objetivoDefendido; }
+    public readonly int costoMana;
+    public AccionEnemigaPendiente(string nombreAtaque, PersonajeCombate objetivo, int dano, bool objetivoDefendido, int costoMana)
+    {
+        this.nombreAtaque = nombreAtaque;
+        this.objetivo = objetivo;
+        this.dano = dano;
+        this.objetivoDefendido = objetivoDefendido;
+        this.costoMana = costoMana;
+    }
 }
-
 public readonly struct ResultadoAccionEnemiga
 {
     public readonly string nombreAtaque;
