@@ -1,5 +1,7 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -15,9 +17,10 @@ public sealed class CombateUIController : MonoBehaviour
     [SerializeField, Min(0f)] private float pausaDePreparacion = 0.9f;
     [SerializeField, Min(0f)] private float pausaTrasImpacto = 0.75f;
     [SerializeField, Min(2f)] private float tiempoMaximoResolucion = 8f;
-    private enum MenuActivo { Comandos, Ataques, Inventario }
+    private enum MenuActivo { Comandos, Ataques, Inventario, ObjetivosMana }
 
     private PersonajeCombate personaje;
+    private PersonajeCombate[] aliados = Array.Empty<PersonajeCombate>();
     private EnemigoCombate enemigo;
     private PersonajeCardUI[] fichasPersonaje;
     private TMP_Text nombreEnemigoTexto;
@@ -25,6 +28,10 @@ public sealed class CombateUIController : MonoBehaviour
     private TMP_Text registroTexto;
     private TMP_Text turnoTexto;
     private TMP_Text mensajeFinalTexto;
+    private TMP_Text tituloComandosTexto;
+    private TMP_Text tituloAtaquesTexto;
+    private TMP_Text encabezadoNormalesTexto;
+    private TMP_Text encabezadoEspecialesTexto;
     private Image vidaEnemigoRelleno;
     private GameObject menuComandos;
     private GameObject menuAtaques;
@@ -46,6 +53,7 @@ public sealed class CombateUIController : MonoBehaviour
     private readonly List<Button> botonesActivos = new List<Button>();
     private MenuActivo menuActual = MenuActivo.Comandos;
     private int turno = 1;
+    private int indiceAliadoActual;
     private int indiceSeleccionado;
     private bool turnoDeIren = true;
     private bool combateTerminado;
@@ -56,12 +64,19 @@ public sealed class CombateUIController : MonoBehaviour
     private Coroutine corutinaResolucion;
     private const int MaxEntradasHistorial = 6;
     private readonly List<string> historialAcciones = new List<string>();
+    private readonly HashSet<PersonajeCombate> personajesDefendidos = new HashSet<PersonajeCombate>();
+    private bool siguienteAliadoPendiente;
 
     private void Awake()
     {
-        personaje = FindFirstObjectByType<PersonajeCombate>();
+        aliados = FindObjectsOfType<PersonajeCombate>()
+            .Where(a => a != null && a.isActiveAndEnabled)
+            .OrderByDescending(a => a.Iniciativa)
+            .ToArray();
         enemigo = FindFirstObjectByType<EnemigoCombate>();
-        fichasPersonaje = GetComponentsInChildren<PersonajeCardUI>(true);
+        fichasPersonaje = GetComponentsInChildren<PersonajeCardUI>(true)
+            .OrderBy(ficha => ((RectTransform)ficha.transform).anchoredPosition.x)
+            .ToArray();
 
         nombreEnemigoTexto = Obtener<TMP_Text>("EnemyCard/EnemyName");
         vidaEnemigoTexto = Obtener<TMP_Text>("EnemyCard/EnemyHP");
@@ -73,6 +88,10 @@ public sealed class CombateUIController : MonoBehaviour
         menuInventario = Obtener<Transform>("BattlePanel/ActionPanel/Inventory")?.gameObject;
         panelFinal = Obtener<Transform>("EndPanel")?.gameObject;
         mensajeFinalTexto = Obtener<TMP_Text>("EndPanel/EndMessage");
+        tituloComandosTexto = Obtener<TMP_Text>("BattlePanel/ActionPanel/CommandTitle");
+        tituloAtaquesTexto = Obtener<TMP_Text>("BattlePanel/ActionPanel/Attacks/AttackTitle");
+        encabezadoNormalesTexto = Obtener<TMP_Text>("BattlePanel/ActionPanel/Attacks/NormalHeader");
+        encabezadoEspecialesTexto = Obtener<TMP_Text>("BattlePanel/ActionPanel/Attacks/ManaHeader");
 
         botonAtacar = Obtener<Button>("BattlePanel/ActionPanel/Commands/BtnAttack");
         botonInventario = Obtener<Button>("BattlePanel/ActionPanel/Commands/BtnInventory");
@@ -93,10 +112,10 @@ public sealed class CombateUIController : MonoBehaviour
 
     private void Start()
     {
-        if (personaje == null || enemigo == null)
+        if (aliados.Length == 0 || enemigo == null)
         {
-            EscribirRegistro(personaje == null
-                ? "No se encontró DOCTOR: revisa el componente PersonajeCombate."
+            EscribirRegistro(aliados.Length == 0
+                ? "No se encontró ningún aliado con PersonajeCombate."
                 : "No se encontró el enemigo: revisa el componente EnemigoCombate.");
             if (turnoTexto != null) turnoTexto.text = "COMBATE SIN CONFIGURAR";
             if (mensajeFinalTexto != null) mensajeFinalTexto.text = "Falta un personaje o enemigo en la escena.";
@@ -104,11 +123,52 @@ public sealed class CombateUIController : MonoBehaviour
             ActivarMenu(null);
             return;
         }
+        indiceAliadoActual = PrimerAliadoVivo();
+        if (indiceAliadoActual < 0)
+        {
+            EscribirRegistro("No hay aliados en pie para iniciar el combate.");
+            TerminarCombate(false);
+            return;
+        }
+        personaje = aliados[indiceAliadoActual];
+        VincularFichasAliados();
         ActualizarEstado();
         historialAcciones.Clear();
         EscribirRegistro("El GOLEM bloquea el camino.");
-        if (turnoTexto != null) turnoTexto.text = $"T{turno:00} · TURNO DE {personaje.Nombre}";
+        EscribirRegistro("Iniciativa: " + string.Join(" → ", aliados.Select(a => a.Nombre + " " + a.Iniciativa)) + ".");
+        ActualizarIndicadorTurno();
         MostrarComandos();
+    }
+
+    private int PrimerAliadoVivo() => SiguienteAliadoVivo(0);
+
+    private int SiguienteAliadoVivo(int inicio)
+    {
+        if (aliados == null || aliados.Length == 0) return -1;
+        for (int i = Math.Max(0, inicio); i < aliados.Length; i++)
+            if (aliados[i] != null && aliados[i].isActiveAndEnabled && aliados[i].Vida > 0) return i;
+        return -1;
+    }
+
+    private void SeleccionarAliado(int indice)
+    {
+        if (indice < 0 || indice >= aliados.Length || aliados[indice] == null) return;
+        indiceAliadoActual = indice;
+        personaje = aliados[indice];
+        ActualizarIndicadorTurno();
+    }
+
+    private void VincularFichasAliados()
+    {
+        if (fichasPersonaje == null) return;
+        for (int i = 0; i < fichasPersonaje.Length; i++)
+            fichasPersonaje[i].Vincular(i < aliados.Length ? aliados[i] : null);
+    }
+
+    private void ActualizarIndicadorTurno()
+    {
+        if (turnoTexto != null && personaje != null)
+            turnoTexto.text = $"T{turno:00} · TURNO DE {personaje.Nombre.ToUpperInvariant()}";
     }
 
     private void Update()
@@ -167,6 +227,100 @@ public sealed class CombateUIController : MonoBehaviour
         Conectar(botonReiniciar, ReiniciarCombate);
     }
 
+    private void ConfigurarAccionesAtaque()
+    {
+        RestaurarBotonObjetivo(botonTajo);
+        RestaurarBotonObjetivo(botonEstocada);
+        RestaurarBotonObjetivo(botonChispa);
+        RestaurarBotonObjetivo(botonPulso);
+
+        if (personaje != null && personaje.EsCura)
+        {
+            CambiarTextoBoton(botonTajo, "GOLPE DE BÁCULO", "5–8 daño   ·   0 PM");
+            CambiarTextoBoton(botonEstocada, "RAYO SAGRADO", "22–27 daño   ·   10 PM");
+            CambiarTextoBoton(botonChispa, "REGENERAR PM", $"Cuesta {personaje.CostoRegenerarMana} PM   ·   recupera {personaje.CantidadRegenerarMana} PM");
+            CambiarTextoBoton(botonPulso, "", "");
+            if (botonPulso != null) botonPulso.gameObject.SetActive(false);
+            if (encabezadoNormalesTexto != null) encabezadoNormalesTexto.text = "CUERPO A CUERPO";
+            if (encabezadoEspecialesTexto != null) encabezadoEspecialesTexto.text = "MAGIA   ·   APOYO";
+            Conectar(botonTajo, () => EjecutarAtaque(TipoAtaque.GolpeBaculo, "Golpe de báculo"));
+            Conectar(botonEstocada, () => EjecutarAtaque(TipoAtaque.RayoSagrado, "Rayo sagrado"));
+            Conectar(botonChispa, AbrirObjetivosMana);
+        }
+        else
+        {
+            CambiarTextoBoton(botonTajo, "TAJO", "7–10 daño   ·   0 PM");
+            CambiarTextoBoton(botonEstocada, "ESTOCADA", "11–15 daño   ·   0 PM");
+            CambiarTextoBoton(botonChispa, "CHISPA UMBRÍA", "15–19 daño   ·   6 PM");
+            CambiarTextoBoton(botonPulso, "PULSO ARCANO", "22–27 daño   ·   10 PM");
+            if (botonPulso != null) botonPulso.gameObject.SetActive(true);
+            if (encabezadoNormalesTexto != null) encabezadoNormalesTexto.text = "NORMALES   ·   0 PM";
+            if (encabezadoEspecialesTexto != null) encabezadoEspecialesTexto.text = "ESPECIALES   ·   GASTAN PM";
+            Conectar(botonTajo, () => EjecutarAtaque(TipoAtaque.Tajo, "Tajo"));
+            Conectar(botonEstocada, () => EjecutarAtaque(TipoAtaque.Estocada, "Estocada"));
+            Conectar(botonChispa, () => EjecutarAtaque(TipoAtaque.ChispaUmbria, "Chispa umbría"));
+            Conectar(botonPulso, () => EjecutarAtaque(TipoAtaque.PulsoArcano, "Pulso arcano"));
+        }
+
+        Conectar(botonVolverAtaques, MostrarComandos);
+    }
+
+    private void AbrirObjetivosMana()
+    {
+        if (!PuedeActuar() || personaje == null || !personaje.EsCura) return;
+
+        menuActual = MenuActivo.ObjetivosMana;
+        ActivarMenu(menuAtaques);
+        if (tituloAtaquesTexto != null) tituloAtaquesTexto.text = "REGENERAR PM   ·   ELEGIR ALIADO";
+        if (encabezadoNormalesTexto != null) encabezadoNormalesTexto.text = "ELIGE A QUIÉN AYUDAR";
+        if (encabezadoEspecialesTexto != null) encabezadoEspecialesTexto.text = "NO SE PUEDE ELEGIR AL ENEMIGO";
+
+        Button[] botonesObjetivo = { botonTajo, botonEstocada, botonChispa, botonPulso };
+        foreach (Button boton in botonesObjetivo)
+            if (boton != null) boton.gameObject.SetActive(true);
+        List<Button> seleccionables = new List<Button>();
+        int indiceBoton = 0;
+        foreach (PersonajeCombate aliado in aliados)
+        {
+            if (aliado == null || aliado.Vida <= 0 || indiceBoton >= botonesObjetivo.Length) continue;
+            Button boton = botonesObjetivo[indiceBoton++];
+            boton.gameObject.SetActive(true);
+            CambiarTextoBoton(boton, aliado.Nombre.ToUpperInvariant(), $"Recupera {personaje.CantidadRegenerarMana} PM");
+            bool puedeRecibir = aliado == personaje || aliado.Mana < aliado.ManaMaximo;
+            boton.interactable = puedeRecibir && personaje.Mana >= personaje.CostoRegenerarMana;
+            Conectar(boton, () => RegenerarMana(aliado));
+            seleccionables.Add(boton);
+        }
+
+        for (int i = indiceBoton; i < botonesObjetivo.Length; i++)
+            botonesObjetivo[i].gameObject.SetActive(false);
+
+        CambiarTextoBoton(botonVolverAtaques, "VOLVER", "");
+        Conectar(botonVolverAtaques, AbrirAtaques);
+        seleccionables.Add(botonVolverAtaques);
+        ConfigurarSeleccion(seleccionables.ToArray());
+    }
+
+    private void RegenerarMana(PersonajeCombate objetivo)
+    {
+        if (!PuedeActuar() || personaje == null || !personaje.UsarRegenerarMana(objetivo, out int recuperado)) return;
+        IniciarResolucion($"{personaje.Nombre} regenera {recuperado} PM de {objetivo.Nombre}.", false);
+    }
+
+    private static void CambiarTextoBoton(Button boton, string titulo, string detalle)
+    {
+        if (boton == null) return;
+        TMP_Text label = boton.transform.Find("Label")?.GetComponent<TMP_Text>();
+        TMP_Text detail = boton.transform.Find("Detail")?.GetComponent<TMP_Text>();
+        if (label != null) label.text = titulo;
+        if (detail != null) detail.text = detalle;
+    }
+
+    private static void RestaurarBotonObjetivo(Button boton)
+    {
+        if (boton != null) boton.gameObject.SetActive(true);
+    }
+
     private void Conectar(Button boton, UnityEngine.Events.UnityAction accion)
     {
         if (boton == null) return;
@@ -182,6 +336,8 @@ public sealed class CombateUIController : MonoBehaviour
         if (combateTerminado || !turnoDeIren || resolviendoAcciones) return;
         menuActual = MenuActivo.Comandos;
         ActivarMenu(menuComandos);
+        if (tituloComandosTexto != null)
+            tituloComandosTexto.text = $"¿QUÉ HARÁ {personaje.Nombre.ToUpperInvariant()}?";
         ConfigurarSeleccion(botonAtacar, botonInventario, botonDefenderse);
     }
 
@@ -190,8 +346,14 @@ public sealed class CombateUIController : MonoBehaviour
         if (!PuedeActuar()) return;
         menuActual = MenuActivo.Ataques;
         ActivarMenu(menuAtaques);
+        ConfigurarAccionesAtaque();
         ActualizarDisponibilidad();
-        ConfigurarSeleccion(botonTajo, botonEstocada, botonChispa, botonPulso, botonVolverAtaques);
+        if (tituloAtaquesTexto != null)
+            tituloAtaquesTexto.text = personaje.EsCura ? "ATAQUES Y HABILIDADES DE CURA" : "ATAQUES DE DOCTOR";
+        if (personaje.EsCura)
+            ConfigurarSeleccion(botonTajo, botonEstocada, botonChispa, botonVolverAtaques);
+        else
+            ConfigurarSeleccion(botonTajo, botonEstocada, botonChispa, botonPulso, botonVolverAtaques);
     }
 
     private void AbrirInventario()
@@ -293,6 +455,7 @@ public sealed class CombateUIController : MonoBehaviour
     private void Defenderse()
     {
         if (!PuedeActuar()) return;
+        personajesDefendidos.Add(personaje);
         IniciarResolucion($"{personaje.Nombre} se defiende.", true);
     }
 
@@ -316,28 +479,36 @@ public sealed class CombateUIController : MonoBehaviour
         ActualizarEstado();
         if (turnoTexto != null) turnoTexto.text = $"T{turno:00} · ACCIÓN DE {personaje.Nombre.ToUpperInvariant()}";
 
-        // Pausas en tiempo real: el flujo no depende de Time.timeScale.
+        // Cada aliado vivo actúa por iniciativa; el enemigo responde una vez al final de la ronda.
         yield return new WaitForSecondsRealtime(pausaAntesDecisionEnemiga);
         if (enemigo == null || enemigo.Vida <= 0)
         {
-            AvanzarTurno();
+            SeleccionarSiguienteAliado();
             yield break;
         }
 
-        PersonajeCombate[] objetivos = FindObjectsByType<PersonajeCombate>(FindObjectsSortMode.None);
-        AccionEnemigaPendiente pendiente = enemigo.PrepararAccion(objetivos, defensa ? personaje : null);
+        int siguiente = SiguienteAliadoVivo(indiceAliadoActual + 1);
+        if (siguiente >= 0)
+        {
+            SeleccionarAliado(siguiente);
+            siguienteAliadoPendiente = true;
+            EscribirRegistro($"Ahora actúa {personaje.Nombre}: elige una acción.");
+            yield break;
+        }
+
+        AccionEnemigaPendiente pendiente = enemigo.PrepararAccionConProteccion(aliados, personajesDefendidos);
         if (pendiente.objetivo == null)
         {
-            if (TodosLosPersonajesDerrotados(objetivos))
+            if (TodosLosPersonajesDerrotados(aliados))
             {
                 EscribirRegistro($"{enemigo.Nombre} no encuentra a nadie en pie.");
-                AvanzarTurno();
+                AvanzarRonda();
                 TerminarCombate(false);
             }
             else
             {
-                EscribirRegistro($"{enemigo.Nombre} no puede actuar; el turno pasa a {personaje.Nombre}.");
-                AvanzarTurno();
+                EscribirRegistro($"{enemigo.Nombre} no puede actuar. Comienza una nueva ronda.");
+                AvanzarRonda();
             }
             yield break;
         }
@@ -355,17 +526,16 @@ public sealed class CombateUIController : MonoBehaviour
         else
             EscribirRegistro($"{enemigo.Nombre} intenta atacar, pero ya no encuentra un objetivo.");
 
-        if (TodosLosPersonajesDerrotados(objetivos))
+        if (TodosLosPersonajesDerrotados(aliados))
         {
-            AvanzarTurno();
             yield return new WaitForSecondsRealtime(pausaTrasImpacto);
             TerminarCombate(false);
             yield break;
         }
 
-        AvanzarTurno();
+        AvanzarRonda();
         yield return new WaitForSecondsRealtime(pausaTrasImpacto);
-        EscribirRegistro($"Vuelve el turno de {personaje.Nombre}: elige una acción.");
+        EscribirRegistro($"Comienza una nueva ronda. Actúa {personaje.Nombre}.");
         }
         finally
         {
@@ -374,26 +544,42 @@ public sealed class CombateUIController : MonoBehaviour
         }
     }
 
-    private void AvanzarTurno()
+    private void SeleccionarSiguienteAliado()
+    {
+        int siguiente = SiguienteAliadoVivo(indiceAliadoActual + 1);
+        if (siguiente >= 0)
+        {
+            SeleccionarAliado(siguiente);
+            siguienteAliadoPendiente = true;
+            return;
+        }
+        AvanzarRonda();
+    }
+
+    private void AvanzarRonda()
     {
         if (turnoAvanzadoEnResolucion) return;
         turno++;
         turnoAvanzadoEnResolucion = true;
+        siguienteAliadoPendiente = false;
+        personajesDefendidos.Clear();
+        int primero = PrimerAliadoVivo();
+        if (primero >= 0) SeleccionarAliado(primero);
         ActualizarEstado();
     }
 
     private void FinalizarResolucion()
     {
-        if (!turnoAvanzadoEnResolucion && !combateTerminado)
-            AvanzarTurno();
+        if (!turnoAvanzadoEnResolucion && !siguienteAliadoPendiente && !combateTerminado)
+            AvanzarRonda();
         corutinaResolucion = null;
         resolviendoAcciones = false;
         if (combateTerminado) return;
         turnoDeIren = true;
+        siguienteAliadoPendiente = false;
         DesbloquearTodosLosBotones();
         ActualizarDisponibilidad();
-        string nombreJugador = personaje != null ? personaje.Nombre.ToUpperInvariant() : "JUGADOR";
-        if (turnoTexto != null) turnoTexto.text = $"T{turno:00} · TURNO DE {nombreJugador}";
+        ActualizarIndicadorTurno();
         MostrarComandos();
     }
 
@@ -404,15 +590,11 @@ public sealed class CombateUIController : MonoBehaviour
         if (corutinaResolucion != null)
             StopCoroutine(corutinaResolucion);
         corutinaResolucion = null;
-        if (!turnoAvanzadoEnResolucion)
-        {
-            turno++;
-            turnoAvanzadoEnResolucion = true;
-        }
+        if (!turnoAvanzadoEnResolucion && !siguienteAliadoPendiente) AvanzarRonda();
         resolviendoAcciones = false;
         suprimiendoFinalizacion = false;
         EscribirRegistro("La acción tardó demasiado; se cierra este turno para recuperar el combate.");
-        EscribirRegistro($"Vuelve el turno de {personaje.Nombre}: elige una acción.");
+        EscribirRegistro($"Se recupera el control. Actúa {personaje.Nombre}.");
         FinalizarResolucion();
     }
 
@@ -436,8 +618,10 @@ public sealed class CombateUIController : MonoBehaviour
 
     private void ActualizarDisponibilidad()
     {
-        if (botonChispa != null) botonChispa.interactable = personaje != null && personaje.Mana >= 6;
-        if (botonPulso != null) botonPulso.interactable = personaje != null && personaje.Mana >= 10;
+        if (botonTajo != null) botonTajo.interactable = personaje != null;
+        if (botonEstocada != null) botonEstocada.interactable = personaje != null && (!personaje.EsCura || personaje.Mana >= 10);
+        if (botonChispa != null) botonChispa.interactable = personaje != null && (personaje.EsCura ? personaje.Mana >= personaje.CostoRegenerarMana : personaje.Mana >= 6);
+        if (botonPulso != null) botonPulso.interactable = personaje != null && !personaje.EsCura && personaje.Mana >= 10;
         if (botonVenda != null) botonVenda.interactable = personaje != null && personaje.Vendas > 0 && personaje.Vida < personaje.VidaMaxima;
         if (botonTonico != null) botonTonico.interactable = personaje != null && personaje.Tonicos > 0 && personaje.Mana < personaje.ManaMaximo;
         ActualizarDetalle(botonVenda, personaje != null ? $"Recupera 14 PV   ·   QUEDAN {personaje.Vendas}" : string.Empty);
@@ -491,7 +675,8 @@ public sealed class CombateUIController : MonoBehaviour
         suprimiendoFinalizacion = true;
         if (corutinaResolucion != null) StopCoroutine(corutinaResolucion);
         corutinaResolucion = null;
-        if (personaje != null) personaje.Reiniciar();
+        foreach (PersonajeCombate aliado in aliados)
+            if (aliado != null) aliado.Reiniciar();
         if (enemigo != null) enemigo.Reiniciar();
         DesbloquearTodosLosBotones();
         turno = 1;
@@ -499,10 +684,15 @@ public sealed class CombateUIController : MonoBehaviour
         turnoDeIren = true;
         resolviendoAcciones = false;
         turnoAvanzadoEnResolucion = false;
+        siguienteAliadoPendiente = false;
+        personajesDefendidos.Clear();
+        indiceAliadoActual = PrimerAliadoVivo();
+        if (indiceAliadoActual >= 0) SeleccionarAliado(indiceAliadoActual);
         suprimiendoFinalizacion = false;
         if (panelFinal != null) panelFinal.SetActive(false);
         historialAcciones.Clear();
         EscribirRegistro("El GOLEM bloquea el camino.");
+        EscribirRegistro("Iniciativa: " + string.Join(" → ", aliados.Select(a => a.Nombre + " " + a.Iniciativa)) + ".");
         ActualizarEstado();
         MostrarComandos();
     }

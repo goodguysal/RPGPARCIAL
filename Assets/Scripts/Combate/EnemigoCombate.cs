@@ -50,6 +50,15 @@ public sealed class EnemigoCombate : MonoBehaviour
     /// <summary>Elige ataque y objetivo, pero reserva el daño para el momento del impacto.</summary>
     public AccionEnemigaPendiente PrepararAccion(PersonajeCombate[] posiblesObjetivos, PersonajeCombate objetivoProtegido = null)
     {
+        ICollection<PersonajeCombate> protegidos = objetivoProtegido != null
+            ? new[] { objetivoProtegido }
+            : null;
+        return PrepararAccionConProteccion(posiblesObjetivos, protegidos);
+    }
+
+    public AccionEnemigaPendiente PrepararAccionConProteccion(PersonajeCombate[] posiblesObjetivos,
+        ICollection<PersonajeCombate> objetivosProtegidos)
+    {
         List<PersonajeCombate> vivos = new List<PersonajeCombate>();
         if (posiblesObjetivos != null)
             foreach (PersonajeCombate candidato in posiblesObjetivos)
@@ -62,9 +71,17 @@ public sealed class EnemigoCombate : MonoBehaviour
         PersonajeCombate objetivo = ElegirObjetivo(vivos);
         AtaqueEnemigo ataque = ElegirAtaque();
         int dano = UnityEngine.Random.Range(ataque.danoMinimo, ataque.danoMaximo + 1);
-        bool defendido = objetivo == objetivoProtegido;
+        bool defendido = EstaProtegido(objetivo, objetivosProtegidos);
         if (defendido) dano = Mathf.CeilToInt(dano * 0.5f);
         return new AccionEnemigaPendiente(ataque.nombre, objetivo, dano, defendido);
+    }
+
+    private static bool EstaProtegido(PersonajeCombate objetivo, ICollection<PersonajeCombate> protegidos)
+    {
+        if (protegidos == null) return false;
+        foreach (PersonajeCombate personaje in protegidos)
+            if (personaje == objetivo) return true;
+        return false;
     }
 
     public ResultadoAccionEnemiga EjecutarAccion(AccionEnemigaPendiente accion)
