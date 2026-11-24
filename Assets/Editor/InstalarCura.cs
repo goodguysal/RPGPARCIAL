@@ -18,23 +18,40 @@ public static class InstalarCura
     [InitializeOnLoadMethod]
     private static void EjecutarSolicitud()
     {
-        EditorApplication.delayCall += () =>
+        EditorApplication.delayCall += EjecutarSolicitudSegura;
+    }
+
+    private static void EjecutarSolicitudSegura()
+    {
+        string solicitud = Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Temp", "restore", ArchivoSolicitud);
+        if (!File.Exists(solicitud)) return;
+        if (EditorApplication.isPlayingOrWillChangePlaymode)
         {
-            string solicitud = Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Temp", "restore", ArchivoSolicitud);
-            if (!File.Exists(solicitud)) return;
-            try
-            {
-                Aplicar();
-                File.Delete(solicitud);
-                Debug.Log("CURA quedó configurada con PRIEST y vinculada a la tarjeta de aliado.");
-            }
-            catch (Exception e) { Debug.LogException(e); }
-        };
+            EditorApplication.playModeStateChanged -= ReanudarAlVolverAEdicion;
+            EditorApplication.playModeStateChanged += ReanudarAlVolverAEdicion;
+            return;
+        }
+        try
+        {
+            Aplicar();
+            File.Delete(solicitud);
+            Debug.Log("CURA quedó configurada con PRIEST y vinculada a la tarjeta de aliado.");
+        }
+        catch (Exception e) { Debug.LogException(e); }
+    }
+
+    private static void ReanudarAlVolverAEdicion(PlayModeStateChange state)
+    {
+        if (state != PlayModeStateChange.EnteredEditMode) return;
+        EditorApplication.playModeStateChanged -= ReanudarAlVolverAEdicion;
+        EditorApplication.delayCall += EjecutarSolicitudSegura;
     }
 
     [MenuItem("Tools/RPG/Instalar CURA como PRIEST")]
     public static void Aplicar()
     {
+        if (EditorApplication.isPlayingOrWillChangePlaymode)
+            throw new InvalidOperationException("Sal de Play Mode antes de instalar CURA en la escena.");
         Scene scene = SceneManager.GetSceneByPath(RutaEscena);
         bool openedHere = !scene.IsValid() || !scene.isLoaded;
         if (openedHere) scene = EditorSceneManager.OpenScene(RutaEscena, OpenSceneMode.Additive);
@@ -77,6 +94,9 @@ public static class InstalarCura
         }
     }
 
+    [MenuItem("Tools/RPG/Instalar CURA como PRIEST", true)]
+    private static bool PuedeAplicar() => !EditorApplication.isPlayingOrWillChangePlaymode;
+
     private static Material ObtenerMaterialCura()
     {
         Material material = AssetDatabase.LoadAssetAtPath<Material>(RutaMaterialCura);
@@ -91,6 +111,13 @@ public static class InstalarCura
 
     private static void ReemplazarModelo(Transform parent, GameObject prefab, Material material, Scene scene)
     {
+        Transform yaInstalado = parent.Find("PriestModel");
+        if (yaInstalado != null)
+        {
+            AsignarMaterial(yaInstalado.GetComponentsInChildren<Renderer>(true), material);
+            return;
+        }
+
         Transform anterior = parent.childCount > 0 ? parent.GetChild(0) : null;
         Bounds boundsAnteriores = ObtenerBounds(anterior);
         Quaternion rotacionAnterior = anterior != null ? anterior.rotation : Quaternion.identity;

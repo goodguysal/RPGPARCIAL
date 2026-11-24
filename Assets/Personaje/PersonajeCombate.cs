@@ -32,6 +32,8 @@ public sealed class PersonajeCombate : MonoBehaviour
 
     private Animator animator;
     private static readonly int AtaqueTrigger = Animator.StringToHash("Attack");
+    private static readonly int SmashTrigger = Animator.StringToHash("Smash");
+    private static readonly int HealTrigger = Animator.StringToHash("Heal");
     private static readonly int GolpeTrigger = Animator.StringToHash("Hit");
     private static readonly int MuerteTrigger = Animator.StringToHash("Death");
     private static readonly int EstadoIdle = Animator.StringToHash("Base Layer.Idle");
@@ -51,6 +53,8 @@ public sealed class PersonajeCombate : MonoBehaviour
         if (animator != null && animator.runtimeAnimatorController != null)
         {
             animator.ResetTrigger(AtaqueTrigger);
+            animator.ResetTrigger(SmashTrigger);
+            animator.ResetTrigger(HealTrigger);
             animator.ResetTrigger(GolpeTrigger);
             animator.ResetTrigger(MuerteTrigger);
             animator.Play(EstadoIdle, 0, 0f);
@@ -76,7 +80,10 @@ public sealed class PersonajeCombate : MonoBehaviour
 
         Mana -= ataque.costoMana;
         dano = UnityEngine.Random.Range(ataque.danoMinimo, ataque.danoMaximo + 1);
-        ActivarAnimacion(AtaqueTrigger);
+        int triggerAnimacion = !esCura
+            ? AtaqueTrigger
+            : tipo == TipoAtaque.GolpeBaculo ? SmashTrigger : HealTrigger;
+        ActivarAnimacion(triggerAnimacion);
         return true;
     }
 
@@ -133,6 +140,8 @@ public sealed class PersonajeCombate : MonoBehaviour
 
         Mana -= costoRegenerarMana;
         manaRecuperado = objetivo.RecuperarMana(cantidadRegenerarMana);
+        if (manaRecuperado > 0)
+            ActivarAnimacion(HealTrigger);
         return manaRecuperado > 0;
     }
 

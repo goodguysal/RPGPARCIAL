@@ -22,28 +22,41 @@ public static class InstalarAnimacionesDoctor
     [InitializeOnLoadMethod]
     private static void EjecutarSolicitudUnica()
     {
-        EditorApplication.delayCall += () =>
-        {
-            string solicitud = Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Temp", "restore", NombreSolicitud);
-            if (!File.Exists(solicitud)) return;
+        EditorApplication.delayCall += EjecutarSolicitudSegura;
+    }
 
-            try
-            {
-                InstalarEnEscena();
-                File.Delete(solicitud);
-                AssetDatabase.Refresh();
-                Debug.Log("Animator Controller y animaciones asignados a DOCTOR.");
-            }
-            catch (Exception excepcion)
-            {
-                Debug.LogException(excepcion);
-            }
-        };
+    private static void EjecutarSolicitudSegura()
+    {
+        string solicitud = Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Temp", "restore", NombreSolicitud);
+        if (!File.Exists(solicitud)) return;
+        if (EditorApplication.isPlayingOrWillChangePlaymode)
+        {
+            EditorApplication.playModeStateChanged -= ReanudarAlVolverAEdicion;
+            EditorApplication.playModeStateChanged += ReanudarAlVolverAEdicion;
+            return;
+        }
+        try
+        {
+            InstalarEnEscena();
+            File.Delete(solicitud);
+            AssetDatabase.Refresh();
+            Debug.Log("Animator Controller y animaciones asignados a DOCTOR.");
+        }
+        catch (Exception excepcion) { Debug.LogException(excepcion); }
+    }
+
+    private static void ReanudarAlVolverAEdicion(PlayModeStateChange state)
+    {
+        if (state != PlayModeStateChange.EnteredEditMode) return;
+        EditorApplication.playModeStateChanged -= ReanudarAlVolverAEdicion;
+        EditorApplication.delayCall += EjecutarSolicitudSegura;
     }
 
     [MenuItem("Tools/RPG/Asignar animaciones a DOCTOR")]
     public static void InstalarEnEscena()
     {
+        if (EditorApplication.isPlayingOrWillChangePlaymode)
+            throw new InvalidOperationException("Sal de Play Mode antes de instalar animaciones de DOCTOR en la escena.");
         Scene escena = SceneManager.GetSceneByPath(RutaEscena);
         if (!escena.IsValid() || !escena.isLoaded)
             escena = EditorSceneManager.OpenScene(RutaEscena, OpenSceneMode.Additive);
@@ -75,6 +88,9 @@ public static class InstalarAnimacionesDoctor
         if (!EditorSceneManager.SaveScene(escena))
             throw new InvalidOperationException("Unity no pudo guardar Assets/Scenes/Combate.unity.");
     }
+
+    [MenuItem("Tools/RPG/Asignar animaciones a DOCTOR", true)]
+    private static bool PuedeInstalar() => !EditorApplication.isPlayingOrWillChangePlaymode;
 
     private static AnimationClip PrepararClip(string ruta, bool loop, bool fijarAlturaRaiz)
     {

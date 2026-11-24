@@ -112,6 +112,19 @@ public sealed class CombateUIController : MonoBehaviour
 
     private void Start()
     {
+        // Cada entrada a Play Mode comienza una pelea limpia, sin conservar el panel de un intento anterior.
+        turno = 1;
+        combateTerminado = false;
+        turnoDeIren = false;
+        resolviendoAcciones = false;
+        turnoAvanzadoEnResolucion = false;
+        siguienteAliadoPendiente = false;
+        personajesDefendidos.Clear();
+        if (panelFinal != null) panelFinal.SetActive(false);
+        foreach (PersonajeCombate aliado in aliados)
+            if (aliado != null) aliado.Reiniciar();
+        if (enemigo != null) enemigo.Reiniciar();
+
         if (aliados.Length == 0 || enemigo == null)
         {
             EscribirRegistro(aliados.Length == 0
@@ -137,6 +150,7 @@ public sealed class CombateUIController : MonoBehaviour
         EscribirRegistro("El GOLEM bloquea el camino.");
         EscribirRegistro("Iniciativa: " + string.Join(" → ", aliados.Select(a => a.Nombre + " " + a.Iniciativa)) + ".");
         ActualizarIndicadorTurno();
+        turnoDeIren = true;
         MostrarComandos();
     }
 
@@ -425,7 +439,15 @@ public sealed class CombateUIController : MonoBehaviour
 
     private void EjecutarAtaque(TipoAtaque tipo, string nombreAtaque)
     {
-        if (!PuedeActuar() || enemigo == null || !personaje.UsarAtaque(tipo, out int dano)) return;
+        if (!PuedeActuar() || enemigo == null) return;
+        if (enemigo.Vida <= 0)
+        {
+            enemigo.Reiniciar();
+            ActualizarEstado();
+            EscribirRegistro("El GOLEM vuelve a levantarse; el combate sigue.");
+            return;
+        }
+        if (!personaje.UsarAtaque(tipo, out int dano)) return;
 
         enemigo.RecibirDano(dano);
         ActualizarEstado();
