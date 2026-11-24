@@ -23,11 +23,29 @@ public sealed class EnemigoCombate : MonoBehaviour
     public int VidaMaxima => vidaMaxima;
     public int Vida { get; private set; }
 
+    private Animator animator;
+    private static readonly int AtaqueTrigger = Animator.StringToHash("Attack");
+    private static readonly int GolpeTrigger = Animator.StringToHash("Hit");
+    private static readonly int EstadoIdle = Animator.StringToHash("Base Layer.Idle");
+
     private void Awake() => Reiniciar();
 
-    public void Reiniciar() => Vida = Mathf.Clamp(vidaInicial, 0, vidaMaxima);
+    public void Reiniciar()
+    {
+        Vida = Mathf.Clamp(vidaInicial, 0, vidaMaxima);
+        ObtenerAnimator();
+        if (animator == null || animator.runtimeAnimatorController == null) return;
+        animator.ResetTrigger(AtaqueTrigger);
+        animator.ResetTrigger(GolpeTrigger);
+        animator.Play(EstadoIdle, 0, 0f);
+    }
 
-    public void RecibirDano(int cantidad) => Vida = Mathf.Max(0, Vida - Mathf.Max(0, cantidad));
+    public void RecibirDano(int cantidad)
+    {
+        int dano = Mathf.Max(0, cantidad);
+        Vida = Mathf.Max(0, Vida - dano);
+        if (dano > 0) ActivarAnimacion(GolpeTrigger);
+    }
 
     /// <summary>Elige ataque y objetivo, pero reserva el daño para el momento del impacto.</summary>
     public AccionEnemigaPendiente PrepararAccion(PersonajeCombate[] posiblesObjetivos, PersonajeCombate objetivoProtegido = null)
@@ -53,8 +71,22 @@ public sealed class EnemigoCombate : MonoBehaviour
     {
         if (accion.objetivo == null || !accion.objetivo.isActiveAndEnabled || accion.objetivo.Vida <= 0)
             return default;
+        ActivarAnimacion(AtaqueTrigger);
         accion.objetivo.RecibirDano(accion.dano);
         return new ResultadoAccionEnemiga(accion.nombreAtaque, accion.objetivo, accion.dano, accion.objetivoDefendido);
+    }
+
+    private void ActivarAnimacion(int trigger)
+    {
+        ObtenerAnimator();
+        if (animator != null && animator.runtimeAnimatorController != null)
+            animator.SetTrigger(trigger);
+    }
+
+    private void ObtenerAnimator()
+    {
+        if (animator == null)
+            animator = GetComponentInChildren<Animator>(true);
     }
 
     private PersonajeCombate ElegirObjetivo(List<PersonajeCombate> objetivos)
