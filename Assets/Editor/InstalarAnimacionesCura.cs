@@ -15,6 +15,7 @@ public static class InstalarAnimacionesCura
     private const string RutaIdle = "Assets/CURA/Old Man Idle.fbx";
     private const string RutaSmash = "Assets/CURA/Smash.fbx";
     private const string RutaHeal = "Assets/CURA/Magic Heal.fbx";
+    private const string RutaAtaqueMagico = "Assets/CURA/Standing 1H Magic Attack 01.fbx";
     private const string RutaGolpe = "Assets/Personaje/Hit To Body.fbx";
     private const string RutaMuerte = "Assets/Personaje/Standing React Death Backward.fbx";
     private const string RutaControlador = "Assets/CURA/CURA_Combat.controller";
@@ -81,9 +82,10 @@ public static class InstalarAnimacionesCura
             AnimationClip idle = PrepararClip(RutaIdle, true, false);
             AnimationClip smash = PrepararClip(RutaSmash, false, false);
             AnimationClip heal = PrepararClip(RutaHeal, false, false);
+            AnimationClip ataqueMagico = PrepararClip(RutaAtaqueMagico, false, false);
             AnimationClip golpe = PrepararClipCompartido(RutaGolpe, false, false);
             AnimationClip muerte = PrepararClipCompartido(RutaMuerte, false, true);
-            AnimatorController controller = CrearControlador(idle, smash, heal, golpe, muerte);
+            AnimatorController controller = CrearControlador(idle, smash, heal, ataqueMagico, golpe, muerte);
 
             Undo.RecordObject(animator, "Asignar animaciones Humanoid a CURA");
             animator.avatar = avatar;
@@ -167,7 +169,7 @@ public static class InstalarAnimacionesCura
     }
 
     private static AnimatorController CrearControlador(AnimationClip idleClip, AnimationClip smashClip,
-        AnimationClip healClip, AnimationClip hitClip, AnimationClip deathClip)
+        AnimationClip healClip, AnimationClip ataqueMagicoClip, AnimationClip hitClip, AnimationClip deathClip)
     {
         AnimatorController controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(RutaControlador);
         if (controller == null) controller = AnimatorController.CreateAnimatorControllerAtPath(RutaControlador);
@@ -183,26 +185,31 @@ public static class InstalarAnimacionesCura
         if (idle == null) idle = maquina.AddState("Idle");
         AnimatorState smash = ObtenerEstado(maquina, "Smash") ?? maquina.AddState("Smash");
         AnimatorState heal = ObtenerEstado(maquina, "Heal") ?? maquina.AddState("Heal");
+        AnimatorState ataqueMagico = ObtenerEstado(maquina, "MagicAttack") ?? maquina.AddState("MagicAttack");
         AnimatorState hit = ObtenerEstado(maquina, "Hit") ?? maquina.AddState("Hit");
         AnimatorState death = ObtenerEstado(maquina, "Death") ?? maquina.AddState("Death");
 
         idle.motion = idleClip;
         smash.motion = smashClip;
         heal.motion = healClip;
+        ataqueMagico.motion = ataqueMagicoClip;
         hit.motion = hitClip;
         death.motion = deathClip;
         maquina.defaultState = idle;
 
         AgregarTriggerSiFalta(controller, "Smash");
         AgregarTriggerSiFalta(controller, "Heal");
+        AgregarTriggerSiFalta(controller, "MagicAttack");
         AgregarTriggerSiFalta(controller, "Hit");
         AgregarTriggerSiFalta(controller, "Death");
         AsegurarTransicionAnyState(maquina, smash, "Smash");
         AsegurarTransicionAnyState(maquina, heal, "Heal");
+        AsegurarTransicionAnyState(maquina, ataqueMagico, "MagicAttack");
         AsegurarTransicionAnyState(maquina, hit, "Hit");
         AsegurarTransicionAnyState(maquina, death, "Death");
         AsegurarRetorno(idle, smash);
         AsegurarRetorno(idle, heal);
+        AsegurarRetorno(idle, ataqueMagico);
         AsegurarRetorno(idle, hit);
 
         EditorUtility.SetDirty(controller);

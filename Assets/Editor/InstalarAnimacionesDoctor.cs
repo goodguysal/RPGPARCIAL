@@ -7,16 +7,20 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-/// <summary>Prepara las animaciones y el Animator Controller del personaje DOCTOR.</summary>
+/// <summary>Configura animaciones, curación con maná y bastón del personaje DOCTOR.</summary>
 public static class InstalarAnimacionesDoctor
 {
     private const string RutaEscena = "Assets/Scenes/Combate.unity";
     private const string RutaAvatar = "Assets/Polytope Studio/Lowpoly_Characters/Sources/Meshes/PT_Plague_Doctor.fbx";
     private const string RutaIdle = "Assets/Personaje/Ready Idle.fbx";
-    private const string RutaAtaque = "Assets/Personaje/Boxing.fbx";
+    private const string RutaAtaque = "Assets/Personaje/Great Sword Slash.fbx";
+    private const string RutaCuracion = "Assets/Personaje/Great Sword Power Up.fbx";
     private const string RutaGolpe = "Assets/Personaje/Hit To Body.fbx";
     private const string RutaMuerte = "Assets/Personaje/Standing React Death Backward.fbx";
     private const string RutaControlador = "Assets/Personaje/DOCTOR_Combat.controller";
+    private const string RutaBaston = "Assets/Polytope Studio/Lowpoly_Weapons/Prefabs/PT_Plague_Doctor_Wand_01.prefab";
+    private const string RutaMaterialBaston = "Assets/Materials/Combat/DOCTOR_Staff_URP.mat";
+    private const string RutaMaterialArmasURP = "Assets/Materials/Combat/ESQUELETO_Weapons_URP.mat";
     private const string NombreSolicitud = "InstalarAnimacionesDoctor.once";
 
     [InitializeOnLoadMethod]
@@ -74,15 +78,17 @@ public static class InstalarAnimacionesDoctor
 
         AnimationClip idle = PrepararClip(RutaIdle, true, false);
         AnimationClip ataque = PrepararClip(RutaAtaque, false, false);
+        AnimationClip curacion = PrepararClip(RutaCuracion, false, false);
         AnimationClip golpe = PrepararClip(RutaGolpe, false, false);
         AnimationClip muerte = PrepararClip(RutaMuerte, false, true);
-        AnimatorController controller = CrearControlador(idle, ataque, golpe, muerte);
+        AnimatorController controller = CrearControlador(idle, ataque, curacion, golpe, muerte);
 
         Undo.RecordObject(animator, "Asignar Animator Controller a DOCTOR");
         animator.avatar = avatar;
         animator.runtimeAnimatorController = controller;
         animator.applyRootMotion = false;
         EditorUtility.SetDirty(animator);
+        InstalarBaston(animator, escena);
 
         EditorSceneManager.MarkSceneDirty(escena);
         if (!EditorSceneManager.SaveScene(escena))
@@ -130,7 +136,7 @@ public static class InstalarAnimacionesDoctor
     }
 
     private static AnimatorController CrearControlador(AnimationClip idleClip, AnimationClip ataqueClip,
-        AnimationClip golpeClip, AnimationClip muerteClip)
+        AnimationClip curacionClip, AnimationClip golpeClip, AnimationClip muerteClip)
     {
         AnimatorController controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(RutaControlador);
         if (controller == null)
@@ -146,27 +152,86 @@ public static class InstalarAnimacionesDoctor
         }
         if (idle == null) idle = maquina.AddState("Idle");
         AnimatorState ataque = ObtenerEstado(maquina, "Attack") ?? maquina.AddState("Attack");
+        AnimatorState curacion = ObtenerEstado(maquina, "Heal") ?? maquina.AddState("Heal");
         AnimatorState golpe = ObtenerEstado(maquina, "Hit") ?? maquina.AddState("Hit");
         AnimatorState muerte = ObtenerEstado(maquina, "Death") ?? maquina.AddState("Death");
 
         idle.motion = idleClip;
         ataque.motion = ataqueClip;
+        curacion.motion = curacionClip;
         golpe.motion = golpeClip;
         muerte.motion = muerteClip;
         maquina.defaultState = idle;
 
         AgregarTriggerSiFalta(controller, "Attack");
+        AgregarTriggerSiFalta(controller, "Heal");
         AgregarTriggerSiFalta(controller, "Hit");
         AgregarTriggerSiFalta(controller, "Death");
         AsegurarTransicionAnyState(maquina, ataque, "Attack");
+        AsegurarTransicionAnyState(maquina, curacion, "Heal");
         AsegurarTransicionAnyState(maquina, golpe, "Hit");
         AsegurarTransicionAnyState(maquina, muerte, "Death");
         AsegurarRetorno(idle, ataque);
+        AsegurarRetorno(idle, curacion);
         AsegurarRetorno(idle, golpe);
 
         EditorUtility.SetDirty(controller);
         AssetDatabase.SaveAssets();
         return controller;
+    }
+
+    private static void InstalarBaston(Animator animator, Scene escena)
+    {
+        Transform mano = animator.GetBoneTransform(HumanBodyBones.RightHand);
+        if (mano == null) throw new InvalidOperationException("El Avatar de DOCTOR no tiene el hueso RightHand.");
+
+        foreach (Transform hijo in animator.GetComponentsInChildren<Transform>(true))
+            if (hijo.name == "DoctorStaffModel") Undo.DestroyObjectImmediate(hijo.gameObject);
+
+        GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(RutaBaston);
+        if (prefab == null) throw new InvalidOperationException("No se encontró el bastón del Plague Doctor: " + RutaBaston);
+        GameObject baston = PrefabUtility.InstantiatePrefab(prefab, escena) as GameObject;
+        if (baston == null) throw new InvalidOperationException("Unity no pudo instanciar el bastón de DOCTOR.");
+        Undo.RegisterCreatedObjectUndo(baston, "Añadir bastón de Plague Doctor");
+        baston.name = "DoctorStaffModel";
+        baston.transform.SetParent(mano, false);
+        baston.transform.localPosition = new Vector3(-0.0193496f, -0.099109754f, -0.023399422f);
+        baston.transform.localRotation = new Quaternion(0.65023524f, 0.7249253f, -0.1828025f, 0.13513233f);
+        baston.transform.localScale = Vector3.one;
+
+        Material material = ObtenerMaterialBaston();
+        foreach (Renderer renderer in baston.GetComponentsInChildren<Renderer>(true))
+        {
+            Undo.RecordObject(renderer, "Aplicar material URP al bastón de DOCTOR");
+            Material[] materiales = renderer.sharedMaterials;
+            for (int i = 0; i < materiales.Length; i++) materiales[i] = material;
+            renderer.sharedMaterials = materiales;
+            PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
+            EditorUtility.SetDirty(renderer);
+        }
+    }
+
+    private static Material ObtenerMaterialBaston()
+    {
+        Material material = AssetDatabase.LoadAssetAtPath<Material>(RutaMaterialBaston);
+        if (material != null) return material;
+
+        Material baseArmas = AssetDatabase.LoadAssetAtPath<Material>(RutaMaterialArmasURP);
+        if (baseArmas != null)
+        {
+            material = new Material(baseArmas) { name = "DOCTOR_Staff_URP" };
+        }
+        else
+        {
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+            if (shader == null) throw new InvalidOperationException("No se encontró URP/Lit para el bastón de DOCTOR.");
+            material = new Material(shader) { name = "DOCTOR_Staff_URP" };
+            Texture textura = AssetDatabase.LoadAssetAtPath<Texture>("Assets/Polytope Studio/Lowpoly_Weapons/Sources/Textures/PT_Weapons_Texture_01_base.png");
+            if (textura != null) material.SetTexture("_BaseMap", textura);
+        }
+        AssetDatabase.CreateAsset(material, RutaMaterialBaston);
+        AssetDatabase.SaveAssets();
+        return material;
     }
 
     private static AnimatorState ObtenerEstado(AnimatorStateMachine maquina, string nombre)
@@ -215,3 +280,4 @@ public static class InstalarAnimacionesDoctor
         return null;
     }
 }
+

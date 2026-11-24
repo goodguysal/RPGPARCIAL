@@ -14,9 +14,32 @@ public sealed class PersonajeCardUI : MonoBehaviour
     [SerializeField] private Image vidaRelleno;
     [SerializeField] private Image manaRelleno;
 
+    private Slider vidaSlider;
+    private Slider manaSlider;
+    private TMP_Text indicadorObjetivo;
+    private float vidaObjetivo;
+    private float manaObjetivo;
+    private bool valoresInicializados;
+    private const float VelocidadAnimacion = 90f;
+
     public PersonajeCombate Personaje => personaje;
 
-    private void Start() => Actualizar();
+    private void Awake()
+    {
+        valoresInicializados = false;
+        vidaSlider = AsegurarSlider(vidaRelleno);
+        manaSlider = AsegurarSlider(manaRelleno);
+        Actualizar();
+    }
+
+    private void Update()
+    {
+        if (!Application.isPlaying || !valoresInicializados) return;
+        if (vidaSlider != null)
+            vidaSlider.value = Mathf.MoveTowards(vidaSlider.value, vidaObjetivo, VelocidadAnimacion * Time.unscaledDeltaTime);
+        if (manaSlider != null)
+            manaSlider.value = Mathf.MoveTowards(manaSlider.value, manaObjetivo, VelocidadAnimacion * Time.unscaledDeltaTime);
+    }
 
     private void OnValidate() => Actualizar();
 
@@ -24,6 +47,34 @@ public sealed class PersonajeCardUI : MonoBehaviour
     {
         personaje = nuevoPersonaje;
         Actualizar();
+    }
+
+    public void MostrarIndicadorObjetivo(bool mostrar)
+    {
+        if (indicadorObjetivo == null && mostrar)
+        {
+            GameObject flecha = new GameObject("TargetArrow", typeof(RectTransform), typeof(TextMeshProUGUI));
+            flecha.transform.SetParent(transform, false);
+            indicadorObjetivo = flecha.GetComponent<TextMeshProUGUI>();
+            indicadorObjetivo.text = "▼";
+            indicadorObjetivo.font = nombreTexto != null ? nombreTexto.font : null;
+            indicadorObjetivo.fontSize = 22f;
+            indicadorObjetivo.color = new Color(1f, 0.78f, 0.24f, 1f);
+            indicadorObjetivo.alignment = TextAlignmentOptions.Center;
+            indicadorObjetivo.raycastTarget = false;
+            indicadorObjetivo.outlineWidth = 0.18f;
+            indicadorObjetivo.outlineColor = new Color(0.12f, 0.07f, 0.03f, 1f);
+
+            RectTransform rect = indicadorObjetivo.rectTransform;
+            rect.anchorMin = new Vector2(0.5f, 1f);
+            rect.anchorMax = new Vector2(0.5f, 1f);
+            rect.pivot = new Vector2(0.5f, 0f);
+            rect.sizeDelta = new Vector2(30f, 26f);
+            rect.anchoredPosition = new Vector2(0f, 3f);
+        }
+
+        if (indicadorObjetivo != null)
+            indicadorObjetivo.gameObject.SetActive(mostrar);
     }
 
     public void Actualizar()
@@ -34,8 +85,8 @@ public sealed class PersonajeCardUI : MonoBehaviour
             Asignar(vidaTexto, "PV   — / —");
             Asignar(manaTexto, "PM   — / —");
             Asignar(iniciativaTexto, "INI   —");
-            if (vidaRelleno != null) vidaRelleno.fillAmount = 0f;
-            if (manaRelleno != null) manaRelleno.fillAmount = 0f;
+            AsignarObjetivo(vidaSlider, 0f, ref vidaObjetivo);
+            AsignarObjetivo(manaSlider, 0f, ref manaObjetivo);
             return;
         }
 
@@ -46,10 +97,39 @@ public sealed class PersonajeCardUI : MonoBehaviour
         Asignar(manaTexto, $"PM   {mana} / {personaje.ManaMaximo}");
         Asignar(iniciativaTexto, $"INI   {personaje.Iniciativa:00}");
 
-        if (vidaRelleno != null)
-            vidaRelleno.fillAmount = personaje.VidaMaxima <= 0 ? 0f : (float)vida / personaje.VidaMaxima;
-        if (manaRelleno != null)
-            manaRelleno.fillAmount = personaje.ManaMaximo <= 0 ? 0f : (float)mana / personaje.ManaMaximo;
+        AsignarObjetivo(vidaSlider, Mathf.Clamp(vida, 0, personaje.VidaMaxima), ref vidaObjetivo);
+        AsignarObjetivo(manaSlider, Mathf.Clamp(mana, 0, personaje.ManaMaximo), ref manaObjetivo);
+    }
+
+    private void AsignarObjetivo(Slider slider, float valor, ref float objetivo)
+    {
+        objetivo = valor;
+        if (slider == null) return;
+        slider.minValue = 0f;
+        slider.maxValue = Mathf.Max(1f, personaje != null
+            ? (slider == vidaSlider ? personaje.VidaMaxima : personaje.ManaMaximo)
+            : 1f);
+        if (!Application.isPlaying || !valoresInicializados)
+            slider.SetValueWithoutNotify(valor);
+        valoresInicializados = true;
+    }
+
+    private static Slider AsegurarSlider(Image relleno)
+    {
+        if (relleno == null) return null;
+        Transform barra = relleno.transform.parent;
+        if (barra == null) return null;
+        Slider slider = barra.GetComponent<Slider>();
+        if (slider == null) slider = barra.gameObject.AddComponent<Slider>();
+        slider.transition = Selectable.Transition.None;
+        slider.interactable = false;
+        slider.navigation = new Navigation { mode = Navigation.Mode.None };
+        slider.handleRect = null;
+        slider.targetGraphic = null;
+        slider.fillRect = relleno.rectTransform;
+        relleno.type = Image.Type.Simple;
+        relleno.fillAmount = 1f;
+        return slider;
     }
 
     private static void Asignar(TMP_Text texto, string valor)

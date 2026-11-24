@@ -13,8 +13,12 @@ public sealed class PersonajeCombate : MonoBehaviour
     [SerializeField] private int vendasIniciales = 1;
     [SerializeField] private int tonicosIniciales = 1;
     [SerializeField] private bool esCura;
+    [SerializeField] private bool esEsqueleto;
     [SerializeField, Min(0)] private int costoRegenerarMana = 4;
     [SerializeField, Min(1)] private int cantidadRegenerarMana = 8;
+    [SerializeField, Min(0)] private int costoCuracionDoctor = 10;
+    [SerializeField, Min(1)] private int cantidadCuracionDoctor = 18;
+    [SerializeField, Min(0)] private int costoAtaquePesadoEsqueleto = 8;
 
     public string Nombre => nombre;
     public int VidaMaxima => vidaMaxima;
@@ -27,15 +31,25 @@ public sealed class PersonajeCombate : MonoBehaviour
     public int Vendas { get; private set; }
     public int Tonicos { get; private set; }
     public bool EsCura => esCura;
+    public bool EsEsqueleto => esEsqueleto;
+    public bool EsDoctor => !esCura && !esEsqueleto;
+    public int CostoContraataque => 18;
+    public bool ContraataquePreparado { get; private set; }
     public int CostoRegenerarMana => costoRegenerarMana;
     public int CantidadRegenerarMana => cantidadRegenerarMana;
+    public int CostoCuracionDoctor => costoCuracionDoctor;
+    public int CantidadCuracionDoctor => cantidadCuracionDoctor;
+    public int CostoAtaquePesadoEsqueleto => costoAtaquePesadoEsqueleto;
 
     private Animator animator;
     private static readonly int AtaqueTrigger = Animator.StringToHash("Attack");
     private static readonly int SmashTrigger = Animator.StringToHash("Smash");
     private static readonly int HealTrigger = Animator.StringToHash("Heal");
+    private static readonly int AtaqueMagicoTrigger = Animator.StringToHash("MagicAttack");
     private static readonly int GolpeTrigger = Animator.StringToHash("Hit");
     private static readonly int MuerteTrigger = Animator.StringToHash("Death");
+    private static readonly int BloqueoTrigger = Animator.StringToHash("Block");
+    private static readonly int DefensaTrigger = Animator.StringToHash("Defend");
     private static readonly int EstadoIdle = Animator.StringToHash("Base Layer.Idle");
 
     private void Awake()
@@ -48,13 +62,17 @@ public sealed class PersonajeCombate : MonoBehaviour
     {
         Vida = Mathf.Clamp(vidaInicial, 0, vidaMaxima);
         Mana = Mathf.Clamp(manaInicial, 0, manaMaximo);
+        ContraataquePreparado = false;
         Vendas = Mathf.Max(0, vendasIniciales);
         Tonicos = Mathf.Max(0, tonicosIniciales);
         if (animator != null && animator.runtimeAnimatorController != null)
         {
             animator.ResetTrigger(AtaqueTrigger);
             animator.ResetTrigger(SmashTrigger);
+            animator.ResetTrigger(BloqueoTrigger);
+            animator.ResetTrigger(DefensaTrigger);
             animator.ResetTrigger(HealTrigger);
+            animator.ResetTrigger(AtaqueMagicoTrigger);
             animator.ResetTrigger(GolpeTrigger);
             animator.ResetTrigger(MuerteTrigger);
             animator.Play(EstadoIdle, 0, 0f);
@@ -82,7 +100,7 @@ public sealed class PersonajeCombate : MonoBehaviour
         dano = UnityEngine.Random.Range(ataque.danoMinimo, ataque.danoMaximo + 1);
         int triggerAnimacion = !esCura
             ? AtaqueTrigger
-            : tipo == TipoAtaque.GolpeBaculo ? SmashTrigger : HealTrigger;
+            : tipo == TipoAtaque.GolpeBaculo ? SmashTrigger : AtaqueMagicoTrigger;
         ActivarAnimacion(triggerAnimacion);
         return true;
     }
@@ -121,6 +139,7 @@ public sealed class PersonajeCombate : MonoBehaviour
         Vida = Mathf.Max(0, Vida - dano);
         if (Vida == 0)
         {
+            ContraataquePreparado = false;
             if (animator != null) animator.ResetTrigger(GolpeTrigger);
             ActivarAnimacion(MuerteTrigger);
         }
@@ -128,6 +147,27 @@ public sealed class PersonajeCombate : MonoBehaviour
         {
             ActivarAnimacion(GolpeTrigger);
         }
+    }
+
+    public void ReproducirDefensa() => ActivarAnimacion(DefensaTrigger);
+
+    public bool PrepararContraataque()
+    {
+        if (!esEsqueleto || Vida <= 0 || Mana < CostoContraataque) return false;
+        Mana -= CostoContraataque;
+        ContraataquePreparado = true;
+        ActivarAnimacion(BloqueoTrigger);
+        return true;
+    }
+
+    public bool BloquearYDevolverGolpe(int danoRecibido, out int danoDevuelto)
+    {
+        danoDevuelto = 0;
+        if (!ContraataquePreparado || Vida <= 0) return false;
+        ContraataquePreparado = false;
+        danoDevuelto = Mathf.Max(0, danoRecibido);
+        ActivarAnimacion(BloqueoTrigger);
+        return true;
     }
 
     public bool UsarRegenerarMana(PersonajeCombate objetivo, out int manaRecuperado)
@@ -152,6 +192,26 @@ public sealed class PersonajeCombate : MonoBehaviour
         return Mana - manaAnterior;
     }
 
+    public bool CurarConMana(PersonajeCombate objetivo, out int vidaRecuperada)
+    {
+        vidaRecuperada = 0;
+        if (!EsDoctor || objetivo == null || Vida <= 0 || objetivo.Vida <= 0 ||
+            objetivo.Vida >= objetivo.VidaMaxima || Mana < costoCuracionDoctor)
+            return false;
+
+        Mana -= costoCuracionDoctor;
+        vidaRecuperada = objetivo.RecuperarVida(cantidadCuracionDoctor);
+        if (vidaRecuperada > 0) ActivarAnimacion(HealTrigger);
+        return vidaRecuperada > 0;
+    }
+
+    public int RecuperarVida(int cantidad)
+    {
+        int vidaAnterior = Vida;
+        Vida = Mathf.Min(vidaMaxima, Vida + Mathf.Max(0, cantidad));
+        return Vida - vidaAnterior;
+    }
+
     private void ActivarAnimacion(int trigger)
     {
         if (animator == null)
@@ -160,12 +220,12 @@ public sealed class PersonajeCombate : MonoBehaviour
             animator.SetTrigger(trigger);
     }
 
-    private static AtaqueCombate ObtenerAtaque(TipoAtaque tipo)
+    private AtaqueCombate ObtenerAtaque(TipoAtaque tipo)
     {
         switch (tipo)
         {
             case TipoAtaque.Estocada:
-                return new AtaqueCombate(11, 15, 0);
+                return new AtaqueCombate(11, 15, esEsqueleto ? costoAtaquePesadoEsqueleto : 0);
             case TipoAtaque.ChispaUmbria:
                 return new AtaqueCombate(15, 19, 6);
             case TipoAtaque.PulsoArcano:

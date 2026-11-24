@@ -17,7 +17,8 @@ public sealed class CombateUIController : MonoBehaviour
     [SerializeField, Min(0f)] private float pausaDePreparacion = 0.9f;
     [SerializeField, Min(0f)] private float pausaTrasImpacto = 0.75f;
     [SerializeField, Min(2f)] private float tiempoMaximoResolucion = 8f;
-    private enum MenuActivo { Comandos, Ataques, Inventario, ObjetivosMana }
+    [SerializeField] private int[] rondasAtaqueDoble = { 3, 5 };
+    private enum MenuActivo { Comandos, Ataques, AtaquesNormales, AtaquesMana, Inventario, ObjetivosMana, ObjetivosCuracionDoctor }
 
     private PersonajeCombate personaje;
     private PersonajeCombate[] aliados = Array.Empty<PersonajeCombate>();
@@ -28,11 +29,16 @@ public sealed class CombateUIController : MonoBehaviour
     private TMP_Text registroTexto;
     private TMP_Text turnoTexto;
     private TMP_Text mensajeFinalTexto;
+    private TMP_Text tituloFinalTexto;
     private TMP_Text tituloComandosTexto;
     private TMP_Text tituloAtaquesTexto;
+    private TMP_Text tituloInventarioTexto;
     private TMP_Text encabezadoNormalesTexto;
     private TMP_Text encabezadoEspecialesTexto;
     private Image vidaEnemigoRelleno;
+    private Slider vidaEnemigoSlider;
+    private float vidaEnemigoObjetivo;
+    private bool vidaEnemigoInicializada;
     private GameObject menuComandos;
     private GameObject menuAtaques;
     private GameObject menuInventario;
@@ -51,6 +57,7 @@ public sealed class CombateUIController : MonoBehaviour
     private Button botonReiniciar;
 
     private readonly List<Button> botonesActivos = new List<Button>();
+    private readonly List<Button> botonesObjetivoCuracionDoctor = new List<Button>();
     private MenuActivo menuActual = MenuActivo.Comandos;
     private int turno = 1;
     private int indiceAliadoActual;
@@ -66,14 +73,11 @@ public sealed class CombateUIController : MonoBehaviour
     private readonly List<string> historialAcciones = new List<string>();
     private readonly HashSet<PersonajeCombate> personajesDefendidos = new HashSet<PersonajeCombate>();
     private bool siguienteAliadoPendiente;
+    private bool seleccionandoObjetivoCuracionDoctor;
 
     private void Awake()
     {
-        aliados = FindObjectsOfType<PersonajeCombate>()
-            .Where(a => a != null && a.isActiveAndEnabled)
-            .OrderByDescending(a => a.Iniciativa)
-            .ToArray();
-        enemigo = FindFirstObjectByType<EnemigoCombate>();
+        ActualizarReferenciasCombate();
         fichasPersonaje = GetComponentsInChildren<PersonajeCardUI>(true)
             .OrderBy(ficha => ((RectTransform)ficha.transform).anchoredPosition.x)
             .ToArray();
@@ -81,6 +85,7 @@ public sealed class CombateUIController : MonoBehaviour
         nombreEnemigoTexto = Obtener<TMP_Text>("EnemyCard/EnemyName");
         vidaEnemigoTexto = Obtener<TMP_Text>("EnemyCard/EnemyHP");
         vidaEnemigoRelleno = Obtener<Image>("EnemyCard/EnemyBar/Fill");
+        vidaEnemigoSlider = AsegurarSlider(vidaEnemigoRelleno);
         turnoTexto = Obtener<TMP_Text>("EnemyCard/TurnText");
         registroTexto = Obtener<TMP_Text>("CombatHistory/CombatLog");
         menuComandos = Obtener<Transform>("BattlePanel/ActionPanel/Commands")?.gameObject;
@@ -88,8 +93,13 @@ public sealed class CombateUIController : MonoBehaviour
         menuInventario = Obtener<Transform>("BattlePanel/ActionPanel/Inventory")?.gameObject;
         panelFinal = Obtener<Transform>("EndPanel")?.gameObject;
         mensajeFinalTexto = Obtener<TMP_Text>("EndPanel/EndMessage");
+        tituloFinalTexto = Obtener<TMP_Text>("EndPanel/EndTitle");
+        if (tituloFinalTexto == null && panelFinal != null)
+            tituloFinalTexto = panelFinal.GetComponentsInChildren<TMP_Text>(true)
+                .FirstOrDefault(texto => texto != mensajeFinalTexto && texto.text == "VICTORIA");
         tituloComandosTexto = Obtener<TMP_Text>("BattlePanel/ActionPanel/CommandTitle");
         tituloAtaquesTexto = Obtener<TMP_Text>("BattlePanel/ActionPanel/Attacks/AttackTitle");
+        tituloInventarioTexto = Obtener<TMP_Text>("BattlePanel/ActionPanel/Inventory/InventoryTitle");
         encabezadoNormalesTexto = Obtener<TMP_Text>("BattlePanel/ActionPanel/Attacks/NormalHeader");
         encabezadoEspecialesTexto = Obtener<TMP_Text>("BattlePanel/ActionPanel/Attacks/ManaHeader");
 
@@ -112,6 +122,7 @@ public sealed class CombateUIController : MonoBehaviour
 
     private void Start()
     {
+        ActualizarReferenciasCombate();
         // Cada entrada a Play Mode comienza una pelea limpia, sin conservar el panel de un intento anterior.
         turno = 1;
         combateTerminado = false;
@@ -131,7 +142,10 @@ public sealed class CombateUIController : MonoBehaviour
                 ? "No se encontró ningún aliado con PersonajeCombate."
                 : "No se encontró el enemigo: revisa el componente EnemigoCombate.");
             if (turnoTexto != null) turnoTexto.text = "COMBATE SIN CONFIGURAR";
-            if (mensajeFinalTexto != null) mensajeFinalTexto.text = "Falta un personaje o enemigo en la escena.";
+            if (tituloFinalTexto != null) tituloFinalTexto.text = "COMBATE SIN CONFIGURAR";
+            if (mensajeFinalTexto != null) mensajeFinalTexto.text = aliados.Length == 0
+                ? "No se encontró ningún aliado activo con PersonajeCombate en esta escena."
+                : "No se encontró un enemigo activo con EnemigoCombate en esta escena.";
             if (panelFinal != null) panelFinal.SetActive(true);
             ActivarMenu(null);
             return;
@@ -182,11 +196,14 @@ public sealed class CombateUIController : MonoBehaviour
     private void ActualizarIndicadorTurno()
     {
         if (turnoTexto != null && personaje != null)
-            turnoTexto.text = $"T{turno:00} · TURNO DE {personaje.Nombre.ToUpperInvariant()}";
+            turnoTexto.text = $"RONDA {turno:00} · TURNO DE {personaje.Nombre.ToUpperInvariant()}";
     }
 
     private void Update()
     {
+        if (vidaEnemigoSlider != null && vidaEnemigoInicializada)
+            vidaEnemigoSlider.value = Mathf.MoveTowards(vidaEnemigoSlider.value, vidaEnemigoObjetivo, 90f * Time.unscaledDeltaTime);
+
         if (resolviendoAcciones && Time.realtimeSinceStartup - inicioResolucionRealtime > Mathf.Max(2f, tiempoMaximoResolucion))
             RecuperarResolucionAtascada();
 
@@ -195,7 +212,7 @@ public sealed class CombateUIController : MonoBehaviour
 
         if (combateTerminado)
         {
-            if (Keyboard.current.eKey.wasPressedThisFrame || Keyboard.current.enterKey.wasPressedThisFrame)
+            if (Keyboard.current.eKey.wasPressedThisFrame || Keyboard.current.enterKey.wasPressedThisFrame || Keyboard.current.spaceKey.wasPressedThisFrame)
                 ReiniciarCombate();
             return;
         }
@@ -203,11 +220,11 @@ public sealed class CombateUIController : MonoBehaviour
         if (!turnoDeIren || resolviendoAcciones)
             return;
 
-        if (Keyboard.current.wKey.wasPressedThisFrame || Keyboard.current.upArrowKey.wasPressedThisFrame)
+        if (Keyboard.current.wKey.wasPressedThisFrame || Keyboard.current.upArrowKey.wasPressedThisFrame || Keyboard.current.leftArrowKey.wasPressedThisFrame)
             MoverSeleccion(-1);
-        else if (Keyboard.current.sKey.wasPressedThisFrame || Keyboard.current.downArrowKey.wasPressedThisFrame)
+        else if (Keyboard.current.sKey.wasPressedThisFrame || Keyboard.current.downArrowKey.wasPressedThisFrame || Keyboard.current.rightArrowKey.wasPressedThisFrame)
             MoverSeleccion(1);
-        else if (Keyboard.current.eKey.wasPressedThisFrame || Keyboard.current.enterKey.wasPressedThisFrame)
+        else if (Keyboard.current.eKey.wasPressedThisFrame || Keyboard.current.enterKey.wasPressedThisFrame || Keyboard.current.spaceKey.wasPressedThisFrame)
             ConfirmarSeleccion();
         else if (Keyboard.current.escapeKey.wasPressedThisFrame || Keyboard.current.backspaceKey.wasPressedThisFrame)
             MostrarComandos();
@@ -248,7 +265,20 @@ public sealed class CombateUIController : MonoBehaviour
         RestaurarBotonObjetivo(botonChispa);
         RestaurarBotonObjetivo(botonPulso);
 
-        if (personaje != null && personaje.EsCura)
+        if (personaje != null && personaje.EsEsqueleto)
+        {
+            CambiarTextoBoton(botonTajo, "TAJO DE ESPADA", "7–10 daño   ·   0 PM");
+            CambiarTextoBoton(botonEstocada, "CORTE PESADO", $"11–15 daño   ·   {personaje.CostoAtaquePesadoEsqueleto} PM");
+            CambiarTextoBoton(botonChispa, "GUARDIA REFLEJA", $"Devuelve el próximo golpe   ·   {personaje.CostoContraataque} PM");
+            CambiarTextoBoton(botonPulso, "", "");
+            if (botonPulso != null) botonPulso.gameObject.SetActive(false);
+            if (encabezadoNormalesTexto != null) encabezadoNormalesTexto.text = "ATAQUES DE ESPADA";
+            if (encabezadoEspecialesTexto != null) encabezadoEspecialesTexto.text = "DEFENSA   ·   CONTRAATAQUE";
+            Conectar(botonTajo, () => EjecutarAtaque(TipoAtaque.Tajo, "Tajo de espada"));
+            Conectar(botonEstocada, () => EjecutarAtaque(TipoAtaque.Estocada, "Corte pesado"));
+            Conectar(botonChispa, PrepararContraataque);
+        }
+        else if (personaje != null && personaje.EsCura)
         {
             CambiarTextoBoton(botonTajo, "GOLPE DE BÁCULO", "5–8 daño   ·   0 PM");
             CambiarTextoBoton(botonEstocada, "RAYO SAGRADO", "22–27 daño   ·   10 PM");
@@ -266,14 +296,21 @@ public sealed class CombateUIController : MonoBehaviour
             CambiarTextoBoton(botonTajo, "TAJO", "7–10 daño   ·   0 PM");
             CambiarTextoBoton(botonEstocada, "ESTOCADA", "11–15 daño   ·   0 PM");
             CambiarTextoBoton(botonChispa, "CHISPA UMBRÍA", "15–19 daño   ·   6 PM");
-            CambiarTextoBoton(botonPulso, "PULSO ARCANO", "22–27 daño   ·   10 PM");
+            CambiarTextoBoton(botonPulso,
+                personaje != null && personaje.EsDoctor ? "SANACIÓN ALQUÍMICA" : "PULSO ARCANO",
+                personaje != null && personaje.EsDoctor
+                    ? $"{personaje.CostoCuracionDoctor} PM   ·   recupera hasta {personaje.CantidadCuracionDoctor} PV"
+                    : "22–27 daño   ·   10 PM");
             if (botonPulso != null) botonPulso.gameObject.SetActive(true);
             if (encabezadoNormalesTexto != null) encabezadoNormalesTexto.text = "NORMALES   ·   0 PM";
             if (encabezadoEspecialesTexto != null) encabezadoEspecialesTexto.text = "ESPECIALES   ·   GASTAN PM";
             Conectar(botonTajo, () => EjecutarAtaque(TipoAtaque.Tajo, "Tajo"));
             Conectar(botonEstocada, () => EjecutarAtaque(TipoAtaque.Estocada, "Estocada"));
             Conectar(botonChispa, () => EjecutarAtaque(TipoAtaque.ChispaUmbria, "Chispa umbría"));
-            Conectar(botonPulso, () => EjecutarAtaque(TipoAtaque.PulsoArcano, "Pulso arcano"));
+            if (personaje != null && personaje.EsDoctor)
+                Conectar(botonPulso, AbrirObjetivosCuracionDoctor);
+            else
+                Conectar(botonPulso, () => EjecutarAtaque(TipoAtaque.PulsoArcano, "Pulso arcano"));
         }
 
         Conectar(botonVolverAtaques, MostrarComandos);
@@ -315,6 +352,77 @@ public sealed class CombateUIController : MonoBehaviour
         ConfigurarSeleccion(seleccionables.ToArray());
     }
 
+    private void AbrirObjetivosCuracionDoctor()
+    {
+        if (!PuedeActuar() || personaje == null || !personaje.EsDoctor) return;
+
+        menuActual = MenuActivo.ObjetivosCuracionDoctor;
+        seleccionandoObjetivoCuracionDoctor = true;
+        LimpiarObjetivosCuracionDoctor();
+        ActivarMenu(menuAtaques);
+        if (tituloAtaquesTexto != null) tituloAtaquesTexto.text = "SANACIÓN ALQUÍMICA   ·   ELEGIR ALIADO";
+        if (encabezadoNormalesTexto != null) encabezadoNormalesTexto.text = "ELIGE A QUIÉN CURAR";
+        if (encabezadoEspecialesTexto != null) encabezadoEspecialesTexto.text = "FLECHAS / W S · E / ENTER / ESPACIO · CLICK";
+
+        Button[] botonesObjetivo = { botonTajo, botonEstocada, botonChispa, botonPulso };
+        List<Button> seleccionables = new List<Button>();
+        int indiceBoton = 0;
+        foreach (PersonajeCombate aliado in aliados)
+        {
+            if (aliado == null || aliado.Vida <= 0 || indiceBoton >= botonesObjetivo.Length) continue;
+            Button boton = botonesObjetivo[indiceBoton++];
+            boton.gameObject.SetActive(true);
+            CambiarTextoBoton(boton, aliado.Nombre.ToUpperInvariant(),
+                $"PV {aliado.Vida}/{aliado.VidaMaxima}   ·   +{Mathf.Min(personaje.CantidadCuracionDoctor, aliado.VidaMaxima - aliado.Vida)} PV");
+            boton.interactable = aliado.Vida < aliado.VidaMaxima && personaje.Mana >= personaje.CostoCuracionDoctor;
+            Conectar(boton, () => CurarConDoctor(aliado));
+            botonesObjetivoCuracionDoctor.Add(boton);
+            seleccionables.Add(boton);
+        }
+
+        for (int i = indiceBoton; i < botonesObjetivo.Length; i++)
+            botonesObjetivo[i].gameObject.SetActive(false);
+
+        CambiarTextoBoton(botonVolverAtaques, "VOLVER", "");
+        Conectar(botonVolverAtaques, AbrirAtaquesMana);
+        seleccionables.Add(botonVolverAtaques);
+        ConfigurarSeleccion(seleccionables.ToArray());
+        ActualizarIndicadorObjetivoCuracionDoctor();
+    }
+
+    private void LimpiarObjetivosCuracionDoctor()
+    {
+        botonesObjetivoCuracionDoctor.Clear();
+        if (fichasPersonaje == null) return;
+        foreach (PersonajeCardUI ficha in fichasPersonaje)
+            if (ficha != null) ficha.MostrarIndicadorObjetivo(false);
+    }
+
+    private void CurarConDoctor(PersonajeCombate objetivo)
+    {
+        if (!PuedeActuar() || personaje == null || !personaje.CurarConMana(objetivo, out int recuperado)) return;
+        seleccionandoObjetivoCuracionDoctor = false;
+        LimpiarObjetivosCuracionDoctor();
+        IniciarResolucion($"{personaje.Nombre} usa Sanación alquímica sobre {objetivo.Nombre}: +{recuperado} PV.", false);
+    }
+
+    private void ActualizarIndicadorObjetivoCuracionDoctor()
+    {
+        if (fichasPersonaje == null) return;
+        foreach (PersonajeCardUI ficha in fichasPersonaje)
+            if (ficha != null) ficha.MostrarIndicadorObjetivo(false);
+
+        if (!seleccionandoObjetivoCuracionDoctor || botonesActivos.Count == 0 ||
+            indiceSeleccionado < 0 || indiceSeleccionado >= botonesActivos.Count) return;
+
+        int indiceObjetivo = botonesObjetivoCuracionDoctor.IndexOf(botonesActivos[indiceSeleccionado]);
+        if (indiceObjetivo < 0 || indiceObjetivo >= aliados.Length) return;
+        PersonajeCombate objetivo = aliados.Where(a => a != null && a.Vida > 0).ElementAtOrDefault(indiceObjetivo);
+        if (objetivo == null) return;
+        PersonajeCardUI fichaObjetivo = fichasPersonaje.FirstOrDefault(f => f != null && f.Personaje == objetivo);
+        if (fichaObjetivo != null) fichaObjetivo.MostrarIndicadorObjetivo(true);
+    }
+
     private void RegenerarMana(PersonajeCombate objetivo)
     {
         if (!PuedeActuar() || personaje == null || !personaje.UsarRegenerarMana(objetivo, out int recuperado)) return;
@@ -348,6 +456,11 @@ public sealed class CombateUIController : MonoBehaviour
     private void MostrarComandos()
     {
         if (combateTerminado || !turnoDeIren || resolviendoAcciones) return;
+        if (personaje == null || !personaje.isActiveAndEnabled || personaje.Vida <= 0)
+        {
+            ActivarMenu(null);
+            return;
+        }
         menuActual = MenuActivo.Comandos;
         ActivarMenu(menuComandos);
         if (tituloComandosTexto != null)
@@ -361,13 +474,72 @@ public sealed class CombateUIController : MonoBehaviour
         menuActual = MenuActivo.Ataques;
         ActivarMenu(menuAtaques);
         ConfigurarAccionesAtaque();
+        if (tituloAtaquesTexto != null) tituloAtaquesTexto.text = "ELEGIR TIPO DE ATAQUE";
+        if (encabezadoNormalesTexto != null) encabezadoNormalesTexto.gameObject.SetActive(false);
+        if (encabezadoEspecialesTexto != null) encabezadoEspecialesTexto.gameObject.SetActive(false);
+        MostrarBotonesAtaque(botonTajo, botonChispa);
+        CambiarTextoBoton(botonTajo, "ATAQUES NORMALES", "No consumen PM");
+        CambiarTextoBoton(botonChispa, "HABILIDADES DE PM", "Usan maná");
+        if (botonTajo != null) botonTajo.interactable = true;
+        if (botonChispa != null) botonChispa.interactable = true;
+        CambiarTextoBoton(botonVolverAtaques, "VOLVER", "");
+        Conectar(botonTajo, AbrirAtaquesNormales);
+        Conectar(botonChispa, AbrirAtaquesMana);
+        Conectar(botonVolverAtaques, MostrarComandos);
+        ConfigurarSeleccion(botonTajo, botonChispa, botonVolverAtaques);
+    }
+
+    private void AbrirAtaquesNormales()
+    {
+        if (!PuedeActuar()) return;
+        menuActual = MenuActivo.AtaquesNormales;
+        ActivarMenu(menuAtaques);
+        ConfigurarAccionesAtaque();
         ActualizarDisponibilidad();
-        if (tituloAtaquesTexto != null)
-            tituloAtaquesTexto.text = personaje.EsCura ? "ATAQUES Y HABILIDADES DE CURA" : "ATAQUES DE DOCTOR";
-        if (personaje.EsCura)
-            ConfigurarSeleccion(botonTajo, botonEstocada, botonChispa, botonVolverAtaques);
-        else
-            ConfigurarSeleccion(botonTajo, botonEstocada, botonChispa, botonPulso, botonVolverAtaques);
+        if (tituloAtaquesTexto != null) tituloAtaquesTexto.text = "ATAQUES NORMALES · 0 PM";
+        if (encabezadoNormalesTexto != null)
+        {
+            encabezadoNormalesTexto.gameObject.SetActive(true);
+            encabezadoNormalesTexto.text = "ATAQUES NORMALES";
+        }
+        if (encabezadoEspecialesTexto != null) encabezadoEspecialesTexto.gameObject.SetActive(false);
+        if (personaje.EsCura || personaje.EsEsqueleto) MostrarBotonesAtaque(botonTajo);
+        else MostrarBotonesAtaque(botonTajo, botonEstocada);
+        CambiarTextoBoton(botonVolverAtaques, "VOLVER A CATEGORÍAS", "");
+        Conectar(botonVolverAtaques, AbrirAtaques);
+        if (personaje.EsCura || personaje.EsEsqueleto) ConfigurarSeleccion(botonTajo, botonVolverAtaques);
+        else ConfigurarSeleccion(botonTajo, botonEstocada, botonVolverAtaques);
+    }
+
+    private void AbrirAtaquesMana()
+    {
+        if (!PuedeActuar()) return;
+        menuActual = MenuActivo.AtaquesMana;
+        ActivarMenu(menuAtaques);
+        ConfigurarAccionesAtaque();
+        ActualizarDisponibilidad();
+        if (tituloAtaquesTexto != null) tituloAtaquesTexto.text = "HABILIDADES · USAN PM";
+        if (encabezadoNormalesTexto != null) encabezadoNormalesTexto.gameObject.SetActive(false);
+        if (encabezadoEspecialesTexto != null)
+        {
+            encabezadoEspecialesTexto.gameObject.SetActive(true);
+            encabezadoEspecialesTexto.text = personaje.EsCura ? "MAGIA   ·   APOYO" : personaje.EsEsqueleto ? "ATAQUES PESADOS   ·   USAN PM" : "ESPECIALES   ·   GASTAN PM";
+        }
+        if (personaje.EsCura) MostrarBotonesAtaque(botonEstocada, botonChispa);
+        else if (personaje.EsEsqueleto) MostrarBotonesAtaque(botonEstocada, botonChispa);
+        else MostrarBotonesAtaque(botonChispa, botonPulso);
+        CambiarTextoBoton(botonVolverAtaques, "VOLVER A CATEGORÍAS", "");
+        Conectar(botonVolverAtaques, AbrirAtaques);
+        if (personaje.EsCura) ConfigurarSeleccion(botonEstocada, botonChispa, botonVolverAtaques);
+        else if (personaje.EsEsqueleto) ConfigurarSeleccion(botonEstocada, botonChispa, botonVolverAtaques);
+        else ConfigurarSeleccion(botonChispa, botonPulso, botonVolverAtaques);
+    }
+
+    private void MostrarBotonesAtaque(params Button[] visibles)
+    {
+        Button[] todos = { botonTajo, botonEstocada, botonChispa, botonPulso };
+        foreach (Button boton in todos)
+            if (boton != null) boton.gameObject.SetActive(visibles.Contains(boton));
     }
 
     private void AbrirInventario()
@@ -381,9 +553,20 @@ public sealed class CombateUIController : MonoBehaviour
 
     private void ActivarMenu(GameObject menu)
     {
-        if (menuComandos != null) menuComandos.SetActive(menu == menuComandos);
-        if (menuAtaques != null) menuAtaques.SetActive(menu == menuAtaques);
-        if (menuInventario != null) menuInventario.SetActive(menu == menuInventario);
+        if (menuActual != MenuActivo.ObjetivosCuracionDoctor && seleccionandoObjetivoCuracionDoctor)
+        {
+            seleccionandoObjetivoCuracionDoctor = false;
+            ActualizarIndicadorObjetivoCuracionDoctor();
+        }
+        bool mostrarComandos = menu != null && menu == menuComandos;
+        bool mostrarAtaques = menu != null && menu == menuAtaques;
+        bool mostrarInventario = menu != null && menu == menuInventario;
+        if (menuComandos != null) menuComandos.SetActive(mostrarComandos);
+        if (menuAtaques != null) menuAtaques.SetActive(mostrarAtaques);
+        if (menuInventario != null) menuInventario.SetActive(mostrarInventario);
+        if (tituloComandosTexto != null) tituloComandosTexto.gameObject.SetActive(mostrarComandos);
+        if (tituloAtaquesTexto != null) tituloAtaquesTexto.gameObject.SetActive(mostrarAtaques);
+        if (tituloInventarioTexto != null) tituloInventarioTexto.gameObject.SetActive(mostrarInventario);
     }
 
     private void ConfigurarSeleccion(params Button[] botones)
@@ -402,6 +585,7 @@ public sealed class CombateUIController : MonoBehaviour
         indiceSeleccionado = PrimerHabilitado(0, 1);
         if (botonesActivos.Count > 0)
             EventSystem.current?.SetSelectedGameObject(botonesActivos[indiceSeleccionado].gameObject);
+        ActualizarIndicadorObjetivoCuracionDoctor();
     }
 
     private void MoverSeleccion(int direccion)
@@ -409,6 +593,7 @@ public sealed class CombateUIController : MonoBehaviour
         if (botonesActivos.Count == 0) return;
         indiceSeleccionado = PrimerHabilitado(indiceSeleccionado + direccion, direccion);
         EventSystem.current?.SetSelectedGameObject(botonesActivos[indiceSeleccionado].gameObject);
+        ActualizarIndicadorObjetivoCuracionDoctor();
     }
 
     private int PrimerHabilitado(int inicio, int direccion)
@@ -428,6 +613,7 @@ public sealed class CombateUIController : MonoBehaviour
         if (indice < 0 || indice >= botonesActivos.Count || !botonesActivos[indice].interactable) return;
         indiceSeleccionado = indice;
         EventSystem.current?.SetSelectedGameObject(botonesActivos[indice].gameObject);
+        ActualizarIndicadorObjetivoCuracionDoctor();
     }
 
     private void ConfirmarSeleccion()
@@ -478,7 +664,14 @@ public sealed class CombateUIController : MonoBehaviour
     {
         if (!PuedeActuar()) return;
         personajesDefendidos.Add(personaje);
+        personaje.ReproducirDefensa();
         IniciarResolucion($"{personaje.Nombre} se defiende.", true);
+    }
+
+    private void PrepararContraataque()
+    {
+        if (!PuedeActuar() || personaje == null || !personaje.PrepararContraataque()) return;
+        IniciarResolucion($"{personaje.Nombre} prepara Guardia refleja y consume {personaje.CostoContraataque} PM.", false);
     }
 
     private void IniciarResolucion(string accion, bool defensa)
@@ -497,67 +690,82 @@ public sealed class CombateUIController : MonoBehaviour
     {
         try
         {
-        EscribirRegistro(accion);
-        ActualizarEstado();
-        if (turnoTexto != null) turnoTexto.text = $"T{turno:00} · ACCIÓN DE {personaje.Nombre.ToUpperInvariant()}";
+            EscribirRegistro(accion);
+            ActualizarEstado();
+            if (turnoTexto != null) turnoTexto.text = $"RONDA {turno:00} · ACCIÓN DE {personaje.Nombre.ToUpperInvariant()}";
 
-        // Cada aliado vivo actúa por iniciativa; el enemigo responde una vez al final de la ronda.
-        yield return new WaitForSecondsRealtime(pausaAntesDecisionEnemiga);
-        if (enemigo == null || enemigo.Vida <= 0)
-        {
-            SeleccionarSiguienteAliado();
-            yield break;
-        }
-
-        int siguiente = SiguienteAliadoVivo(indiceAliadoActual + 1);
-        if (siguiente >= 0)
-        {
-            SeleccionarAliado(siguiente);
-            siguienteAliadoPendiente = true;
-            EscribirRegistro($"Ahora actúa {personaje.Nombre}: elige una acción.");
-            yield break;
-        }
-
-        AccionEnemigaPendiente pendiente = enemigo.PrepararAccionConProteccion(aliados, personajesDefendidos);
-        if (pendiente.objetivo == null)
-        {
-            if (TodosLosPersonajesDerrotados(aliados))
+            // Los aliados actúan por iniciativa; el enemigo responde al final de cada ronda.
+            yield return new WaitForSecondsRealtime(pausaAntesDecisionEnemiga);
+            if (enemigo == null || enemigo.Vida <= 0)
             {
-                EscribirRegistro($"{enemigo.Nombre} no encuentra a nadie en pie.");
-                AvanzarRonda();
-                TerminarCombate(false);
+                SeleccionarSiguienteAliado();
+                yield break;
             }
-            else
+
+            int siguiente = SiguienteAliadoVivo(indiceAliadoActual + 1);
+            if (siguiente >= 0)
             {
-                EscribirRegistro($"{enemigo.Nombre} no puede actuar. Comienza una nueva ronda.");
-                AvanzarRonda();
+                SeleccionarAliado(siguiente);
+                siguienteAliadoPendiente = true;
+                EscribirRegistro($"Ahora actúa {personaje.Nombre}: elige una acción.");
+                yield break;
             }
-            yield break;
-        }
 
-        if (turnoTexto != null) turnoTexto.text = $"T{turno:00} · {enemigo.Nombre.ToUpperInvariant()} PREPARA ATAQUE";
-        EscribirRegistro($"¡{enemigo.Nombre} prepara {pendiente.nombreAtaque} contra {pendiente.objetivo.Nombre}!");
-        yield return new WaitForSecondsRealtime(pausaDePreparacion);
+            int cantidadAtaques = EsRondaDeAtaqueDoble() ? 2 : 1;
+            for (int numeroAtaque = 1; numeroAtaque <= cantidadAtaques; numeroAtaque++)
+            {
+                if (enemigo == null || enemigo.Vida <= 0) break;
+                if (TodosLosPersonajesDerrotados(aliados))
+                {
+                    TerminarCombate(false);
+                    yield break;
+                }
 
-        ResultadoAccionEnemiga resultado = enemigo.EjecutarAccion(pendiente);
-        ActualizarEstado();
-        BloquearBotones(true);
-        if (turnoTexto != null) turnoTexto.text = $"T{turno:00} · IMPACTO";
-        if (resultado.objetivo != null)
-            EscribirRegistro($"{enemigo.Nombre} usa {resultado.nombreAtaque} contra {resultado.objetivo.Nombre}: -{resultado.dano} PV (quedan {resultado.objetivo.Vida}/{resultado.objetivo.VidaMaxima}){(resultado.objetivoDefendido ? "; defensa reduce el daño" : "")}.");
-        else
-            EscribirRegistro($"{enemigo.Nombre} intenta atacar, pero ya no encuentra un objetivo.");
+                AccionEnemigaPendiente pendiente = enemigo.PrepararAccionConProteccion(aliados, personajesDefendidos);
+                if (pendiente.objetivo == null)
+                {
+                    EscribirRegistro($"{enemigo.Nombre} no encuentra a nadie en pie.");
+                    AvanzarRonda();
+                    if (TodosLosPersonajesDerrotados(aliados)) TerminarCombate(false);
+                    yield break;
+                }
 
-        if (TodosLosPersonajesDerrotados(aliados))
-        {
+                if (turnoTexto != null)
+                    turnoTexto.text = $"RONDA {turno:00} · {enemigo.Nombre.ToUpperInvariant()} PREPARA {numeroAtaque}/{cantidadAtaques}";
+                EscribirRegistro($"¡{enemigo.Nombre} prepara ataque {numeroAtaque}/{cantidadAtaques}: {pendiente.nombreAtaque} contra {pendiente.objetivo.Nombre}!");
+                yield return new WaitForSecondsRealtime(pausaDePreparacion);
+
+                ResultadoAccionEnemiga resultado = enemigo.EjecutarAccion(pendiente);
+                ActualizarEstado();
+                BloquearBotones(true);
+                if (turnoTexto != null)
+                    turnoTexto.text = $"RONDA {turno:00} · IMPACTO {numeroAtaque}/{cantidadAtaques}";
+                if (resultado.contraataque)
+                    EscribirRegistro($"Ataque {numeroAtaque}/{cantidadAtaques}: {resultado.objetivo.Nombre} bloquea con su escudo y devuelve {resultado.danoDevuelto} de daño a {enemigo.Nombre}.");
+                else if (resultado.objetivo != null)
+                    EscribirRegistro($"Ataque {numeroAtaque}/{cantidadAtaques}: {enemigo.Nombre} usa {resultado.nombreAtaque} contra {resultado.objetivo.Nombre}: -{resultado.dano} PV (quedan {resultado.objetivo.Vida}/{resultado.objetivo.VidaMaxima}){(resultado.objetivoDefendido ? "; defensa reduce el daño" : "")}.");
+                else
+                    EscribirRegistro($"Ataque {numeroAtaque}/{cantidadAtaques}: {enemigo.Nombre} no encuentra un objetivo.");
+
+                if (TodosLosPersonajesDerrotados(aliados))
+                {
+                    yield return new WaitForSecondsRealtime(pausaTrasImpacto);
+                    TerminarCombate(false);
+                    yield break;
+                }
+                if (enemigo.Vida <= 0)
+                {
+                    yield return new WaitForSecondsRealtime(pausaTrasImpacto);
+                    TerminarCombate(true);
+                    yield break;
+                }
+                if (numeroAtaque < cantidadAtaques)
+                    yield return new WaitForSecondsRealtime(pausaTrasImpacto);
+            }
+
+            AvanzarRonda();
             yield return new WaitForSecondsRealtime(pausaTrasImpacto);
-            TerminarCombate(false);
-            yield break;
-        }
-
-        AvanzarRonda();
-        yield return new WaitForSecondsRealtime(pausaTrasImpacto);
-        EscribirRegistro($"Comienza una nueva ronda. Actúa {personaje.Nombre}.");
+            EscribirRegistro($"Comienza la ronda {turno}. Actúa {personaje.Nombre}.");
         }
         finally
         {
@@ -566,6 +774,10 @@ public sealed class CombateUIController : MonoBehaviour
         }
     }
 
+    private bool EsRondaDeAtaqueDoble()
+    {
+        return rondasAtaqueDoble != null && rondasAtaqueDoble.Contains(turno);
+    }
     private void SeleccionarSiguienteAliado()
     {
         int siguiente = SiguienteAliadoVivo(indiceAliadoActual + 1);
@@ -641,13 +853,18 @@ public sealed class CombateUIController : MonoBehaviour
     private void ActualizarDisponibilidad()
     {
         if (botonTajo != null) botonTajo.interactable = personaje != null;
-        if (botonEstocada != null) botonEstocada.interactable = personaje != null && (!personaje.EsCura || personaje.Mana >= 10);
-        if (botonChispa != null) botonChispa.interactable = personaje != null && (personaje.EsCura ? personaje.Mana >= personaje.CostoRegenerarMana : personaje.Mana >= 6);
-        if (botonPulso != null) botonPulso.interactable = personaje != null && !personaje.EsCura && personaje.Mana >= 10;
+        if (botonEstocada != null) botonEstocada.interactable = personaje != null && (personaje.EsEsqueleto ? personaje.Mana >= personaje.CostoAtaquePesadoEsqueleto : !personaje.EsCura || personaje.Mana >= 10);
+        if (botonChispa != null) botonChispa.interactable = personaje != null && (personaje.EsEsqueleto
+            ? personaje.Mana >= personaje.CostoContraataque
+            : personaje.EsCura ? personaje.Mana >= personaje.CostoRegenerarMana : personaje.Mana >= 6);
+        if (botonPulso != null) botonPulso.interactable = personaje != null &&
+            (personaje.EsDoctor ? personaje.Mana >= personaje.CostoCuracionDoctor : !personaje.EsCura && personaje.Mana >= 10);
         if (botonVenda != null) botonVenda.interactable = personaje != null && personaje.Vendas > 0 && personaje.Vida < personaje.VidaMaxima;
         if (botonTonico != null) botonTonico.interactable = personaje != null && personaje.Tonicos > 0 && personaje.Mana < personaje.ManaMaximo;
         ActualizarDetalle(botonVenda, personaje != null ? $"Recupera 14 PV   ·   QUEDAN {personaje.Vendas}" : string.Empty);
         ActualizarDetalle(botonTonico, personaje != null ? $"Recupera 8 PM   ·   QUEDAN {personaje.Tonicos}" : string.Empty);
+        if (personaje != null && personaje.EsDoctor)
+            ActualizarDetalle(botonPulso, $"{personaje.CostoCuracionDoctor} PM   ·   recupera hasta {personaje.CantidadCuracionDoctor} PV");
     }
 
     private static void ActualizarDetalle(Button boton, string texto)
@@ -662,8 +879,17 @@ public sealed class CombateUIController : MonoBehaviour
         {
             if (nombreEnemigoTexto != null) nombreEnemigoTexto.text = enemigo.Nombre.ToUpperInvariant();
             if (vidaEnemigoTexto != null) vidaEnemigoTexto.text = $"{enemigo.Vida} / {enemigo.VidaMaxima} PV";
-            if (vidaEnemigoRelleno != null)
-                vidaEnemigoRelleno.fillAmount = enemigo.VidaMaxima <= 0 ? 0f : (float)enemigo.Vida / enemigo.VidaMaxima;
+            if (vidaEnemigoSlider != null)
+            {
+                vidaEnemigoSlider.minValue = 0f;
+                vidaEnemigoSlider.maxValue = Mathf.Max(1, enemigo.VidaMaxima);
+                vidaEnemigoObjetivo = Mathf.Clamp(enemigo.Vida, 0, enemigo.VidaMaxima);
+                if (!vidaEnemigoInicializada)
+                {
+                    vidaEnemigoSlider.SetValueWithoutNotify(vidaEnemigoObjetivo);
+                    vidaEnemigoInicializada = true;
+                }
+            }
         }
         if (fichasPersonaje != null)
         {
@@ -681,6 +907,7 @@ public sealed class CombateUIController : MonoBehaviour
         corutinaResolucion = null;
         ActivarMenu(null);
         if (turnoTexto != null) turnoTexto.text = victoria ? "VICTORIA" : "DERROTA";
+        if (tituloFinalTexto != null) tituloFinalTexto.text = victoria ? "VICTORIA" : "DERROTA";
         string mensajeVictoria = personaje != null
             ? $"El GOLEM cae. {personaje.Nombre} conserva {personaje.Vida} PV y {personaje.Mana} PM."
             : "El GOLEM cae. Victoria.";
@@ -697,6 +924,7 @@ public sealed class CombateUIController : MonoBehaviour
         suprimiendoFinalizacion = true;
         if (corutinaResolucion != null) StopCoroutine(corutinaResolucion);
         corutinaResolucion = null;
+        ActualizarReferenciasCombate();
         foreach (PersonajeCombate aliado in aliados)
             if (aliado != null) aliado.Reiniciar();
         if (enemigo != null) enemigo.Reiniciar();
@@ -710,7 +938,17 @@ public sealed class CombateUIController : MonoBehaviour
         personajesDefendidos.Clear();
         indiceAliadoActual = PrimerAliadoVivo();
         if (indiceAliadoActual >= 0) SeleccionarAliado(indiceAliadoActual);
+        else personaje = null;
         suprimiendoFinalizacion = false;
+        if (aliados.Length == 0 || enemigo == null || indiceAliadoActual < 0)
+        {
+            MostrarErrorConfiguracion(aliados.Length == 0
+                ? "No se encontró ningún aliado activo con PersonajeCombate en esta escena."
+                : enemigo == null
+                    ? "No se encontró un enemigo activo con EnemigoCombate en esta escena."
+                    : "No hay aliados con vida para iniciar el combate.");
+            return;
+        }
         if (panelFinal != null) panelFinal.SetActive(false);
         historialAcciones.Clear();
         EscribirRegistro("El GOLEM bloquea el camino.");
@@ -719,10 +957,51 @@ public sealed class CombateUIController : MonoBehaviour
         MostrarComandos();
     }
 
+    private void ActualizarReferenciasCombate()
+    {
+        aliados = FindObjectsOfType<PersonajeCombate>(true)
+            .Where(a => a != null && a.isActiveAndEnabled && a.gameObject.scene == gameObject.scene)
+            .OrderByDescending(a => a.Iniciativa)
+            .ToArray();
+        enemigo = FindObjectsOfType<EnemigoCombate>(true)
+            .FirstOrDefault(e => e != null && e.isActiveAndEnabled && e.gameObject.scene == gameObject.scene);
+    }
+
+    private static Slider AsegurarSlider(Image relleno)
+    {
+        if (relleno == null || relleno.transform.parent == null) return null;
+        Slider slider = relleno.transform.parent.GetComponent<Slider>();
+        if (slider == null) slider = relleno.transform.parent.gameObject.AddComponent<Slider>();
+        slider.transition = Selectable.Transition.None;
+        slider.interactable = false;
+        slider.navigation = new Navigation { mode = Navigation.Mode.None };
+        slider.handleRect = null;
+        slider.targetGraphic = null;
+        slider.fillRect = relleno.rectTransform;
+        relleno.type = Image.Type.Simple;
+        relleno.fillAmount = 1f;
+        return slider;
+    }
+
+    private void MostrarErrorConfiguracion(string mensaje)
+    {
+        combateTerminado = true;
+        turnoDeIren = false;
+        resolviendoAcciones = false;
+        personaje = null;
+        ActivarMenu(null);
+        if (turnoTexto != null) turnoTexto.text = "COMBATE SIN CONFIGURAR";
+        if (tituloFinalTexto != null) tituloFinalTexto.text = "COMBATE SIN CONFIGURAR";
+        if (mensajeFinalTexto != null) mensajeFinalTexto.text = mensaje;
+        if (panelFinal != null) panelFinal.SetActive(true);
+        EscribirRegistro(mensaje);
+        ConfigurarSeleccion(botonReiniciar);
+    }
+
     private void EscribirRegistro(string mensaje)
     {
         if (string.IsNullOrWhiteSpace(mensaje)) return;
-        string entrada = $"T{turno:00}  {mensaje.Replace("\n", " ")}";
+        string entrada = $"RONDA {turno:00} · {mensaje.Replace("\n", " ")}";
         historialAcciones.Add(entrada);
         while (historialAcciones.Count > MaxEntradasHistorial)
             historialAcciones.RemoveAt(0);

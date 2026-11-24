@@ -6,9 +6,9 @@ using UnityEngine;
 public sealed class EnemigoCombate : MonoBehaviour
 {
     [Header("Enemigo")]
-    [SerializeField] private string nombre = "Acechador de turba";
-    [SerializeField, Min(1)] private int vidaMaxima = 42;
-    [SerializeField, Min(0)] private int vidaInicial = 42;
+    [SerializeField] private string nombre = "GOLEM";
+    [SerializeField, Min(1)] private int vidaMaxima = 180;
+    [SerializeField, Min(0)] private int vidaInicial = 180;
 
     [Header("Decisiones")]
     [SerializeField, Range(0f, 1f)] private float probabilidadGolpeFuerte = 0.25f;
@@ -68,7 +68,8 @@ public sealed class EnemigoCombate : MonoBehaviour
         if (vivos.Count == 0 || ataques == null || ataques.Length == 0)
             return default;
 
-        PersonajeCombate objetivo = ElegirObjetivo(vivos);
+        PersonajeCombate objetivo = vivos.Find(personaje => personaje.ContraataquePreparado)
+            ?? ElegirObjetivo(vivos);
         AtaqueEnemigo ataque = ElegirAtaque();
         int dano = UnityEngine.Random.Range(ataque.danoMinimo, ataque.danoMaximo + 1);
         bool defendido = EstaProtegido(objetivo, objetivosProtegidos);
@@ -89,8 +90,13 @@ public sealed class EnemigoCombate : MonoBehaviour
         if (accion.objetivo == null || !accion.objetivo.isActiveAndEnabled || accion.objetivo.Vida <= 0)
             return default;
         ActivarAnimacion(AtaqueTrigger);
+        if (accion.objetivo.BloquearYDevolverGolpe(accion.dano, out int danoDevuelto))
+        {
+            RecibirDano(danoDevuelto);
+            return new ResultadoAccionEnemiga(accion.nombreAtaque, accion.objetivo, 0, accion.objetivoDefendido, true, danoDevuelto);
+        }
         accion.objetivo.RecibirDano(accion.dano);
-        return new ResultadoAccionEnemiga(accion.nombreAtaque, accion.objetivo, accion.dano, accion.objetivoDefendido);
+        return new ResultadoAccionEnemiga(accion.nombreAtaque, accion.objetivo, accion.dano, accion.objetivoDefendido, false, 0);
     }
 
     private void ActivarAnimacion(int trigger)
@@ -154,6 +160,16 @@ public readonly struct ResultadoAccionEnemiga
     public readonly PersonajeCombate objetivo;
     public readonly int dano;
     public readonly bool objetivoDefendido;
-    public ResultadoAccionEnemiga(string nombreAtaque, PersonajeCombate objetivo, int dano, bool objetivoDefendido)
-    { this.nombreAtaque = nombreAtaque; this.objetivo = objetivo; this.dano = dano; this.objetivoDefendido = objetivoDefendido; }
+    public readonly bool contraataque;
+    public readonly int danoDevuelto;
+    public ResultadoAccionEnemiga(string nombreAtaque, PersonajeCombate objetivo, int dano, bool objetivoDefendido,
+        bool contraataque, int danoDevuelto)
+    {
+        this.nombreAtaque = nombreAtaque;
+        this.objetivo = objetivo;
+        this.dano = dano;
+        this.objetivoDefendido = objetivoDefendido;
+        this.contraataque = contraataque;
+        this.danoDevuelto = danoDevuelto;
+    }
 }
