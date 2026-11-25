@@ -12,6 +12,7 @@ public sealed class PersonajeCombate : MonoBehaviour
     [SerializeField, Min(1f)] private float velocidadATB = 12f;
     [SerializeField] private int vendasIniciales = 1;
     [SerializeField] private int tonicosIniciales = 1;
+    [SerializeField, Min(0)] private int salesIniciales = 1;
     [SerializeField] private bool esCura;
     [SerializeField] private bool esEsqueleto;
     [SerializeField, Min(0)] private int costoRegenerarMana = 4;
@@ -19,6 +20,15 @@ public sealed class PersonajeCombate : MonoBehaviour
     [SerializeField, Min(0)] private int costoCuracionDoctor = 10;
     [SerializeField, Min(1)] private int cantidadCuracionDoctor = 18;
     [SerializeField, Min(0)] private int costoAtaquePesadoEsqueleto = 8;
+    [SerializeField, Range(0f, 1f)] private float porcentajeBuffSales = 0.25f;
+    [SerializeField, Min(1)] private int duracionSalesAtaques = 3;
+    [SerializeField, Min(1)] private int danoVenenoPorTurno = 5;
+    [SerializeField, Min(1)] private int duracionVenenoTurnos = 2;
+    [SerializeField, Min(0)] private int esenciasBestiaIniciales = 1;
+    [SerializeField, Min(1)] private int danoImpulsoMinimo = 24;
+    [SerializeField, Min(1)] private int danoImpulsoMaximo = 30;
+    [SerializeField, Min(0)] private int costoImpulsoMana = 8;
+    [SerializeField, Range(0f, 2f)] private float aceleracionATBImpulso = 0.5f;
 
     public string Nombre => nombre;
     public int VidaMaxima => vidaMaxima;
@@ -30,6 +40,21 @@ public sealed class PersonajeCombate : MonoBehaviour
     public int Mana { get; private set; }
     public int Vendas { get; private set; }
     public int Tonicos { get; private set; }
+    public int Sales { get; private set; }
+    public int Venenos { get; private set; }
+    public int EsenciasBestia { get; private set; }
+    public int AtaquesBuffRestantes { get; private set; }
+    public int TurnosParalizado { get; private set; }
+    public string ResumenEstados
+    {
+        get
+        {
+            string resumen = string.Empty;
+            if (AtaquesBuffRestantes > 0) resumen = $"ATQ +{PorcentajeBuffSales:P0} · {AtaquesBuffRestantes} usos";
+            if (TurnosParalizado > 0) resumen += (resumen.Length > 0 ? " · " : string.Empty) + "PARÁLISIS · NO ACTÚA HASTA FIN DEL COMBATE";
+            return resumen;
+        }
+    }
     public bool EsCura => esCura;
     public bool EsEsqueleto => esEsqueleto;
     public bool EsDoctor => !esCura && !esEsqueleto;
@@ -40,6 +65,14 @@ public sealed class PersonajeCombate : MonoBehaviour
     public int CostoCuracionDoctor => costoCuracionDoctor;
     public int CantidadCuracionDoctor => cantidadCuracionDoctor;
     public int CostoAtaquePesadoEsqueleto => costoAtaquePesadoEsqueleto;
+    public int DuracionSalesAtaques => duracionSalesAtaques;
+    public float PorcentajeBuffSales => porcentajeBuffSales;
+    public int DanoVenenoPorTurno => danoVenenoPorTurno;
+    public int DuracionVenenoRondas => duracionVenenoTurnos;
+    public float AceleracionATBImpulso => aceleracionATBImpulso;
+    public int DanoImpulsoMinimo => danoImpulsoMinimo;
+    public int DanoImpulsoMaximo => danoImpulsoMaximo;
+    public int CostoImpulsoMana => costoImpulsoMana;
     public float ATB { get; private set; }
     public float VelocidadATB => Mathf.Max(1f, velocidadATB);
     public float PorcentajeATB => Mathf.Clamp01(ATB / 100f);
@@ -70,6 +103,11 @@ public sealed class PersonajeCombate : MonoBehaviour
         ATB = 0f;
         Vendas = Mathf.Max(0, vendasIniciales);
         Tonicos = Mathf.Max(0, tonicosIniciales);
+        Sales = Mathf.Max(0, salesIniciales);
+        Venenos = EsDoctor ? 3 : 1;
+        EsenciasBestia = Mathf.Max(0, esenciasBestiaIniciales);
+        AtaquesBuffRestantes = 0;
+        TurnosParalizado = 0;
         if (animator != null && animator.runtimeAnimatorController != null)
         {
             animator.ResetTrigger(AtaqueTrigger);
@@ -98,11 +136,18 @@ public sealed class PersonajeCombate : MonoBehaviour
         dano = 0;
         if ((tipo == TipoAtaque.GolpeBaculo || tipo == TipoAtaque.RayoSagrado) && !esCura)
             return false;
+        if (tipo == TipoAtaque.GolpeImpulsor && !EsDoctor)
+            return false;
         if (Mana < ataque.costoMana)
             return false;
 
         Mana -= ataque.costoMana;
         dano = UnityEngine.Random.Range(ataque.danoMinimo, ataque.danoMaximo + 1);
+        if (AtaquesBuffRestantes > 0)
+        {
+            dano = Mathf.CeilToInt(dano * (1f + porcentajeBuffSales));
+            AtaquesBuffRestantes--;
+        }
         int triggerAnimacion = !esCura
             ? AtaqueTrigger
             : tipo == TipoAtaque.GolpeBaculo ? SmashTrigger : AtaqueMagicoTrigger;
@@ -134,6 +179,40 @@ public sealed class PersonajeCombate : MonoBehaviour
         Mana = Mathf.Min(manaMaximo, Mana + 8);
         manaRecuperado = Mana - manaAnterior;
         return true;
+    }
+
+    public bool UsarSalesDeCombate()
+    {
+        if (Sales <= 0 || Vida <= 0) return false;
+        Sales--;
+        AtaquesBuffRestantes = Mathf.Max(AtaquesBuffRestantes, duracionSalesAtaques);
+        return true;
+    }
+
+    public bool UsarVeneno(EnemigoCombate objetivo)
+    {
+        if (Venenos <= 0 || objetivo == null || objetivo.Vida <= 0) return false;
+        Venenos--;
+        objetivo.AplicarVeneno(danoVenenoPorTurno, duracionVenenoTurnos);
+        ActivarAnimacion(AtaqueMagicoTrigger);
+        return true;
+    }
+
+    public bool UsarEsenciaBestia()
+    {
+        if (EsenciasBestia <= 0 || Vida <= 0) return false;
+        EsenciasBestia--;
+        return true;
+    }
+
+    public void AplicarParalisis(int turnos)
+    {
+        if (Vida > 0) TurnosParalizado = 1;
+    }
+
+    public bool ConsumirParalisis()
+    {
+        return TurnosParalizado > 0;
     }
 
     public void RecibirDano(int cantidad)
@@ -221,7 +300,9 @@ public sealed class PersonajeCombate : MonoBehaviour
 
     public void ConsumirATB(float costoRecuperacion)
     {
-        ATB = Mathf.Max(0f, ATB - Mathf.Max(0f, costoRecuperacion));
+        // Every action spends the ready turn. A recovery cost of zero means no
+        // extra delay after that turn is spent, not an infinite ready loop.
+        ATB = costoRecuperacion <= 0f ? 0f : Mathf.Max(0f, ATB - costoRecuperacion);
     }
 
     public void AcelerarATB(float cantidad)
@@ -257,7 +338,9 @@ public sealed class PersonajeCombate : MonoBehaviour
             case TipoAtaque.GolpeBaculo:
                 return new AtaqueCombate(5, 8, 0);
             case TipoAtaque.RayoSagrado:
-                return new AtaqueCombate(22, 27, 10);
+                return new AtaqueCombate(22, 27, 11);
+            case TipoAtaque.GolpeImpulsor:
+                return new AtaqueCombate(danoImpulsoMinimo, Mathf.Max(danoImpulsoMinimo, danoImpulsoMaximo), costoImpulsoMana);
             default:
                 return new AtaqueCombate(7, 10, 0);
         }
@@ -285,5 +368,6 @@ public enum TipoAtaque
     ChispaUmbria,
     PulsoArcano,
     GolpeBaculo,
-    RayoSagrado
+    RayoSagrado,
+    GolpeImpulsor
 }

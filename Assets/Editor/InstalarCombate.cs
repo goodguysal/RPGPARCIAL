@@ -333,6 +333,8 @@ public static class InstalarCombate
         CreateButton("BtnBackInventory", root, "VOLVER", "", 833, 7, new Vector2(128, 30), true, true);
         CreateButton("BtnVenda", root, "VENDA AMARGA", "Recupera 14 PV   ·   QUEDA 1", 16, 86, new Vector2(455, 68), true);
         CreateButton("BtnTonico", root, "TÓNICO DE LUCIÉRNAGA", "Recupera 8 PM   ·   QUEDA 1", 492, 86, new Vector2(455, 68), true);
+        CreateButton("BtnSales", root, "SALES DE COMBATE", "Daño +25% durante 3 ataques", 16, 160, new Vector2(455, 68), true);
+        CreateButton("BtnVial", root, "VIAL TÓXICO · DOCTOR", "Veneno 4 PV × 3 turnos", 492, 160, new Vector2(455, 68), true);
     }
 
     private static void BuildEndPanel(RectTransform screen)

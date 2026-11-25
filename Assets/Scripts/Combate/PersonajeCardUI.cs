@@ -23,6 +23,12 @@ public sealed class PersonajeCardUI : MonoBehaviour
     private Slider vidaSlider;
     private Slider manaSlider;
     private TMP_Text indicadorObjetivo;
+    private TMP_Text estadoTexto;
+    private TMP_Text avisoDebuffTexto;
+    private string avisoDebuff = "";
+    private string avisoATB = "";
+    private float avisoDebuffHasta;
+    private float avisoATBHasta;
     private float vidaObjetivo;
     private float manaObjetivo;
     private bool valoresInicializados;
@@ -37,6 +43,9 @@ public sealed class PersonajeCardUI : MonoBehaviour
         manaSlider = AsegurarSlider(manaRelleno);
         if (atbRelleno == null) atbRelleno = transform.Find("ATBBar/Fill")?.GetComponent<Image>();
         if (atbTexto == null) atbTexto = transform.Find("ATBBar/ATBText")?.GetComponent<TMP_Text>();
+        estadoTexto = transform.Find("Role")?.GetComponent<TMP_Text>();
+        avisoDebuffTexto = transform.Find("DebuffText")?.GetComponent<TMP_Text>();
+        if (estadoTexto != null) estadoTexto.gameObject.SetActive(false);
         if (atbRelleno != null && atbRelleno.transform.parent != null)
         {
             atbSlider = AsegurarATBSlider(atbRelleno);
@@ -46,7 +55,10 @@ public sealed class PersonajeCardUI : MonoBehaviour
 
     private void Update()
     {
-        if (!Application.isPlaying || !valoresInicializados) return;
+        if (!Application.isPlaying) return;
+        ActualizarTextoDebuff();
+        ActualizarTextoATB();
+        if (!valoresInicializados) return;
         if (vidaSlider != null)
             vidaSlider.value = Mathf.MoveTowards(vidaSlider.value, vidaObjetivo, VelocidadAnimacion * Time.unscaledDeltaTime);
         if (manaSlider != null)
@@ -66,7 +78,7 @@ public sealed class PersonajeCardUI : MonoBehaviour
     public void ActualizarATB(float porcentaje, bool listo)
     {
         atbObjetivo = Mathf.Clamp01(porcentaje);
-        if (atbTexto != null) atbTexto.text = listo ? "LISTO" : $"ATB {Mathf.RoundToInt(atbObjetivo * 100f)}%";
+        ActualizarTextoATB(listo);
         if (atbRelleno != null)
         {
             atbRelleno.color = listo
@@ -74,6 +86,37 @@ public sealed class PersonajeCardUI : MonoBehaviour
                 : new Color(0.35f, 0.72f, 0.79f, 1f);
             if (!Application.isPlaying && atbSlider != null) atbSlider.SetValueWithoutNotify(atbObjetivo * 100f);
         }
+    }
+
+    public void MostrarAvisoATB(string texto, float duracion = 3f)
+    {
+        avisoATB = texto;
+        avisoATBHasta = Time.unscaledTime + Mathf.Max(0.1f, duracion);
+        ActualizarTextoATB();
+    }
+
+    public void MostrarAvisoDebuff(string texto, float duracion = 3f)
+    {
+        avisoDebuff = texto;
+        avisoDebuffHasta = Time.unscaledTime + Mathf.Max(0.1f, duracion);
+        ActualizarTextoDebuff();
+    }
+
+    private void ActualizarTextoDebuff()
+    {
+        if (avisoDebuffTexto == null) return;
+        string persistente = personaje != null ? personaje.ResumenEstados : string.Empty;
+        bool avisoVigente = Application.isPlaying && !string.IsNullOrEmpty(avisoDebuff) && Time.unscaledTime < avisoDebuffHasta;
+        avisoDebuffTexto.text = !string.IsNullOrEmpty(persistente) ? persistente : avisoVigente ? avisoDebuff : string.Empty;
+        avisoDebuffTexto.gameObject.SetActive(!string.IsNullOrEmpty(avisoDebuffTexto.text));
+    }
+
+    private void ActualizarTextoATB(bool listo = false)
+    {
+        if (atbTexto == null) return;
+        bool avisoVigente = Application.isPlaying && !string.IsNullOrEmpty(avisoATB) && Time.unscaledTime < avisoATBHasta;
+        string progreso = listo || atbObjetivo >= 1f ? "LISTO" : $"ATB {Mathf.RoundToInt(atbObjetivo * 100f)}%";
+        atbTexto.text = avisoVigente ? $"{progreso} · {avisoATB}" : progreso;
     }
     public void MostrarIndicadorObjetivo(bool mostrar)
     {
@@ -122,6 +165,8 @@ public sealed class PersonajeCardUI : MonoBehaviour
         Asignar(vidaTexto, $"PV   {vida} / {personaje.VidaMaxima}");
         Asignar(manaTexto, $"PM   {mana} / {personaje.ManaMaximo}");
         Asignar(velocidadATBTexto, $"VEL ATB   {personaje.VelocidadATB:0}");
+        if (estadoTexto != null) estadoTexto.gameObject.SetActive(false);
+        ActualizarTextoDebuff();
 
         AsignarObjetivo(vidaSlider, Mathf.Clamp(vida, 0, personaje.VidaMaxima), ref vidaObjetivo);
         AsignarObjetivo(manaSlider, Mathf.Clamp(mana, 0, personaje.ManaMaximo), ref manaObjetivo);

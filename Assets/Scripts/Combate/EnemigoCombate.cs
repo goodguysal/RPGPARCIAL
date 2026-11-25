@@ -13,6 +13,7 @@ public sealed class EnemigoCombate : MonoBehaviour
     [SerializeField, Min(0)] private int manaInicial = 18;
     [SerializeField, Min(0)] private int costoEmbateMana = 4;
     [SerializeField, Min(1f)] private float velocidadATB = 12f;
+    [SerializeField, Range(0f, 1f)] private float probabilidadParalisis = 0.2f;
 
     [Header("Decisiones")]
     [SerializeField, Range(0f, 1f)] private float probabilidadGolpeFuerte = 0.25f;
@@ -32,6 +33,23 @@ public sealed class EnemigoCombate : MonoBehaviour
     public float VelocidadATB => Mathf.Max(1f, velocidadATB);
     public float PorcentajeATB => Mathf.Clamp01(ATB / 100f);
     public bool ListoParaActuar => Vida > 0 && ATB >= 100f;
+    public int RondasVenenoRestantes { get; private set; }
+    public int DanoVeneno { get; private set; }
+    private PersonajeCombate objetivoForzadoProximoAtaque;
+    public bool ATBAcelerado => multiplicadorATBActivo > 1f || multiplicadorATBPreparado > 1f;
+    public string AvisoAceleracionATB
+    {
+        get
+        {
+            float multiplicador = Mathf.Max(multiplicadorATBActivo, multiplicadorATBPreparado);
+            if (multiplicador <= 1f) return string.Empty;
+            string momento = multiplicadorATBPreparado > 1f ? "tras su próxima acción" : "en el llenado actual";
+            return $"GOLEM: ATB +{(multiplicador - 1f):P0} · {momento}";
+        }
+    }
+
+    private float multiplicadorATBActivo = 1f;
+    private float multiplicadorATBPreparado = 1f;
 
     private Animator animator;
     private static readonly int AtaqueTrigger = Animator.StringToHash("Attack");
@@ -45,6 +63,13 @@ public sealed class EnemigoCombate : MonoBehaviour
         Vida = Mathf.Clamp(vidaInicial, 0, vidaMaxima);
         Mana = Mathf.Clamp(manaInicial, 0, manaMaximo);
         ATB = 0f;
+        DanoVeneno = 0;
+        RondasVenenoRestantes = 0;
+        objetivoForzadoProximoAtaque = null;
+        PlayerPrefs.DeleteKey("RPG1.GOLEM.Veneno.Dano");
+        PlayerPrefs.DeleteKey("RPG1.GOLEM.Veneno.Partidas");
+        multiplicadorATBActivo = 1f;
+        multiplicadorATBPreparado = 1f;
         ObtenerAnimator();
         if (animator == null || animator.runtimeAnimatorController == null) return;
         animator.ResetTrigger(AtaqueTrigger);
@@ -55,12 +80,45 @@ public sealed class EnemigoCombate : MonoBehaviour
     public void AvanzarATB(float deltaTiempo)
     {
         if (Vida <= 0 || ATB >= 100f) return;
-        ATB = Mathf.Min(100f, ATB + VelocidadATB * Mathf.Max(0f, deltaTiempo));
+        ATB = Mathf.Min(100f, ATB + VelocidadATB * multiplicadorATBActivo * Mathf.Max(0f, deltaTiempo));
     }
 
     public void ConsumirATB(float costoRecuperacion)
     {
         ATB = Mathf.Max(0f, ATB - Mathf.Max(0f, costoRecuperacion));
+        multiplicadorATBActivo = multiplicadorATBPreparado;
+        multiplicadorATBPreparado = 1f;
+    }
+
+    public void AcelerarProximaRecuperacionATB(float incrementoPorcentual)
+    {
+        float multiplicador = 1f + Mathf.Max(0f, incrementoPorcentual);
+        if (ATB >= 100f)
+            multiplicadorATBPreparado = Mathf.Max(multiplicadorATBPreparado, multiplicador);
+        else
+            multiplicadorATBActivo = Mathf.Max(multiplicadorATBActivo, multiplicador);
+    }
+
+    public void AplicarVeneno(int danoPorTurno, int turnos)
+    {
+        DanoVeneno = Mathf.Max(DanoVeneno, Mathf.Max(1, danoPorTurno));
+        RondasVenenoRestantes += Mathf.Max(1, turnos);
+    }
+
+    public int ProcesarVenenoAlFinalDeRonda()
+    {
+        if (RondasVenenoRestantes <= 0 || Vida <= 0) return 0;
+        int dano = Mathf.Min(Vida, DanoVeneno);
+        RecibirDano(dano);
+        RondasVenenoRestantes--;
+        if (RondasVenenoRestantes == 0) DanoVeneno = 0;
+        return dano;
+    }
+
+    public void ForzarProximoObjetivo(PersonajeCombate objetivo)
+    {
+        if (objetivo != null && objetivo.Vida > 0)
+            objetivoForzadoProximoAtaque = objetivo;
     }
 
     public void AcelerarATB(float cantidad)
@@ -96,7 +154,10 @@ public sealed class EnemigoCombate : MonoBehaviour
         if (vivos.Count == 0 || ataques == null || ataques.Length == 0)
             return default;
 
-        PersonajeCombate objetivo = vivos.Find(personaje => personaje.ContraataquePreparado)
+        if (objetivoForzadoProximoAtaque != null && !vivos.Contains(objetivoForzadoProximoAtaque))
+            objetivoForzadoProximoAtaque = null;
+        PersonajeCombate objetivo = objetivoForzadoProximoAtaque
+            ?? vivos.Find(personaje => personaje.ContraataquePreparado)
             ?? ElegirObjetivo(vivos);
         AtaqueEnemigo ataque = ElegirAtaque();
         int dano = UnityEngine.Random.Range(ataque.danoMinimo, ataque.danoMaximo + 1);
@@ -108,7 +169,9 @@ public sealed class EnemigoCombate : MonoBehaviour
             ataque = ataques[0];
             costoMana = 0;
         }
-        return new AccionEnemigaPendiente(ataque.nombre, objetivo, dano, defendido, costoMana);
+        bool paraliza = UnityEngine.Random.value < probabilidadParalisis;
+        string nombreAtaque = paraliza ? $"{ataque.nombre} paralizante" : ataque.nombre;
+        return new AccionEnemigaPendiente(nombreAtaque, objetivo, dano, defendido, costoMana, paraliza);
     }
 
     private static bool EstaProtegido(PersonajeCombate objetivo, ICollection<PersonajeCombate> protegidos)
@@ -123,15 +186,19 @@ public sealed class EnemigoCombate : MonoBehaviour
     {
         if (accion.objetivo == null || !accion.objetivo.isActiveAndEnabled || accion.objetivo.Vida <= 0)
             return default;
+        if (accion.objetivo == objetivoForzadoProximoAtaque)
+            objetivoForzadoProximoAtaque = null;
         Mana = Mathf.Max(0, Mana - accion.costoMana);
         ActivarAnimacion(AtaqueTrigger);
         if (accion.objetivo.BloquearYDevolverGolpe(accion.dano, out int danoDevuelto))
         {
             RecibirDano(danoDevuelto);
-            return new ResultadoAccionEnemiga(accion.nombreAtaque, accion.objetivo, 0, accion.objetivoDefendido, true, danoDevuelto);
+            return new ResultadoAccionEnemiga(accion.nombreAtaque, accion.objetivo, 0, accion.objetivoDefendido, true, danoDevuelto, false);
         }
         accion.objetivo.RecibirDano(accion.dano);
-        return new ResultadoAccionEnemiga(accion.nombreAtaque, accion.objetivo, accion.dano, accion.objetivoDefendido, false, 0);
+        if (accion.aplicaParalisis && accion.objetivo.Vida > 0) accion.objetivo.AplicarParalisis(1);
+        return new ResultadoAccionEnemiga(accion.nombreAtaque, accion.objetivo, accion.dano, accion.objetivoDefendido, false, 0,
+            accion.aplicaParalisis && accion.objetivo.Vida > 0);
     }
 
     private void ActivarAnimacion(int trigger)
@@ -188,13 +255,15 @@ public readonly struct AccionEnemigaPendiente
     public readonly int dano;
     public readonly bool objetivoDefendido;
     public readonly int costoMana;
-    public AccionEnemigaPendiente(string nombreAtaque, PersonajeCombate objetivo, int dano, bool objetivoDefendido, int costoMana)
+    public readonly bool aplicaParalisis;
+    public AccionEnemigaPendiente(string nombreAtaque, PersonajeCombate objetivo, int dano, bool objetivoDefendido, int costoMana, bool aplicaParalisis)
     {
         this.nombreAtaque = nombreAtaque;
         this.objetivo = objetivo;
         this.dano = dano;
         this.objetivoDefendido = objetivoDefendido;
         this.costoMana = costoMana;
+        this.aplicaParalisis = aplicaParalisis;
     }
 }
 public readonly struct ResultadoAccionEnemiga
@@ -205,8 +274,9 @@ public readonly struct ResultadoAccionEnemiga
     public readonly bool objetivoDefendido;
     public readonly bool contraataque;
     public readonly int danoDevuelto;
+    public readonly bool paralisisAplicada;
     public ResultadoAccionEnemiga(string nombreAtaque, PersonajeCombate objetivo, int dano, bool objetivoDefendido,
-        bool contraataque, int danoDevuelto)
+        bool contraataque, int danoDevuelto, bool paralisisAplicada)
     {
         this.nombreAtaque = nombreAtaque;
         this.objetivo = objetivo;
@@ -214,5 +284,6 @@ public readonly struct ResultadoAccionEnemiga
         this.objetivoDefendido = objetivoDefendido;
         this.contraataque = contraataque;
         this.danoDevuelto = danoDevuelto;
+        this.paralisisAplicada = paralisisAplicada;
     }
 }

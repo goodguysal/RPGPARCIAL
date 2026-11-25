@@ -16,9 +16,10 @@ public sealed class CombateUIController : MonoBehaviour
     [SerializeField, Min(0f)] private float pausaAntesDecisionEnemiga = 0.55f;
     [SerializeField, Min(0f)] private float pausaDePreparacion = 0.9f;
     [SerializeField, Min(0f)] private float pausaTrasImpacto = 0.75f;
+    [SerializeField, Min(0.1f)] private float ventanaCancelarAccion = 0.65f;
     [SerializeField, Min(2f)] private float tiempoMaximoResolucion = 8f;
     [SerializeField] private int[] rondasAtaqueDoble = { 3, 5 };
-    private enum MenuActivo { Comandos, Ataques, AtaquesNormales, AtaquesMana, Inventario, ObjetivosMana, ObjetivosCuracionDoctor }
+    private enum MenuActivo { Comandos, Ataques, AtaquesNormales, AtaquesMana, Inventario, ObjetivosMana, ObjetivosCuracionDoctor, ObjetivosEsenciaBestia }
 
     private PersonajeCombate personaje;
     private PersonajeCombate[] aliados = Array.Empty<PersonajeCombate>();
@@ -39,6 +40,15 @@ public sealed class CombateUIController : MonoBehaviour
     private Image atbEnemigoRelleno;
     private Slider atbEnemigoSlider;
     private TMP_Text atbEnemigoTexto;
+    private TMP_Text debuffEnemigoTexto;
+    private TMP_Text efectoATBEnemigoTexto;
+    private TMP_Text avisoDanoVenenoTexto;
+    private TMP_Text tituloDescripcionHoverTexto;
+    private TMP_Text cuerpoDescripcionHoverTexto;
+    private GameObject panelDescripcionHover;
+    private string avisoDebuffEnemigo = string.Empty;
+    private float avisoDebuffEnemigoHasta;
+    private float avisoDanoVenenoHasta;
     private float atbEnemigoObjetivo;
     private Slider vidaEnemigoSlider;
     private float vidaEnemigoObjetivo;
@@ -56,6 +66,9 @@ public sealed class CombateUIController : MonoBehaviour
     private Button botonPulso;
     private Button botonVenda;
     private Button botonTonico;
+    private Button botonSales;
+    private Button botonVeneno;
+    private Button botonEsenciaBestia;
     private Button botonVolverAtaques;
     private Button botonVolverInventario;
     private Button botonReiniciar;
@@ -69,6 +82,8 @@ public sealed class CombateUIController : MonoBehaviour
     private bool turnoDeIren = true;
     private bool combateTerminado;
     private bool resolviendoAcciones;
+    private bool accionCancelable;
+    private int idResolucion;
     private bool suprimiendoFinalizacion;
     private float inicioResolucionRealtime;
     private Coroutine corutinaResolucion;
@@ -91,6 +106,13 @@ public sealed class CombateUIController : MonoBehaviour
         atbEnemigoRelleno = Obtener<Image>("EnemyCard/ATBBar/Fill");
         atbEnemigoSlider = AsegurarATBSlider(atbEnemigoRelleno);
         atbEnemigoTexto = Obtener<TMP_Text>("EnemyCard/ATBBar/ATBText");
+        debuffEnemigoTexto = Obtener<TMP_Text>("EnemyCard/DebuffText");
+        efectoATBEnemigoTexto = Obtener<TMP_Text>("EnemyCard/ATBEffectText");
+        avisoDanoVenenoTexto = Obtener<TMP_Text>("EnemyCard/PoisonDamageText");
+        panelDescripcionHover = Obtener<Transform>("BattlePanel/ActionPanel/ActionHoverDescription")?.gameObject;
+        tituloDescripcionHoverTexto = Obtener<TMP_Text>("BattlePanel/ActionPanel/ActionHoverDescription/Title");
+        cuerpoDescripcionHoverTexto = Obtener<TMP_Text>("BattlePanel/ActionPanel/ActionHoverDescription/Body");
+        if (panelDescripcionHover != null) panelDescripcionHover.SetActive(false);
         turnoTexto = Obtener<TMP_Text>("EnemyCard/TurnText");
         registroTexto = Obtener<TMP_Text>("CombatHistory/CombatLog");
         menuComandos = Obtener<Transform>("BattlePanel/ActionPanel/Commands")?.gameObject;
@@ -118,6 +140,12 @@ public sealed class CombateUIController : MonoBehaviour
         botonVolverAtaques = Obtener<Button>("BattlePanel/ActionPanel/Attacks/BtnBackAttacks");
         botonVenda = Obtener<Button>("BattlePanel/ActionPanel/Inventory/BtnVenda");
         botonTonico = Obtener<Button>("BattlePanel/ActionPanel/Inventory/BtnTonico");
+        botonSales = Obtener<Button>("BattlePanel/ActionPanel/Inventory/BtnSales") ??
+            CrearBotonConsumible("BtnSales", new Vector2(16f, -160f), "SALES DE COMBATE", "Daño +25% durante 3 ataques");
+        botonVeneno = Obtener<Button>("BattlePanel/ActionPanel/Inventory/BtnVeneno") ??
+            CrearBotonConsumible("BtnVeneno", new Vector2(492f, -160f), "VENENO", "-5 PV al final de las próximas 2 rondas · sin coste de PM/ATB");
+        botonEsenciaBestia = Obtener<Button>("BattlePanel/ActionPanel/Inventory/BtnEsenciaBestia") ??
+            CrearBotonConsumible("BtnEsenciaBestia", new Vector2(16f, -234f), "ESCENCIA DE BESTIA", "El próximo ataque del GOLEM apunta al aliado elegido");
         botonVolverInventario = Obtener<Button>("BattlePanel/ActionPanel/Inventory/BtnBackInventory");
         botonReiniciar = Obtener<Button>("EndPanel/BtnRestart");
 
@@ -202,14 +230,31 @@ public sealed class CombateUIController : MonoBehaviour
             vidaEnemigoSlider.value = Mathf.MoveTowards(vidaEnemigoSlider.value, vidaEnemigoObjetivo, 90f * Time.unscaledDeltaTime);
         if (atbEnemigoSlider != null)
             atbEnemigoSlider.value = Mathf.MoveTowards(atbEnemigoSlider.value, atbEnemigoObjetivo * 100f, 150f * Time.unscaledDeltaTime);
+        if (debuffEnemigoTexto != null && (enemigo == null || enemigo.RondasVenenoRestantes <= 0) && Time.unscaledTime >= avisoDebuffEnemigoHasta)
+            debuffEnemigoTexto.gameObject.SetActive(false);
+        if (avisoDanoVenenoTexto != null && Time.unscaledTime >= avisoDanoVenenoHasta)
+            avisoDanoVenenoTexto.gameObject.SetActive(false);
+
+        if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
+        {
+            if (accionCancelable)
+            {
+                CancelarAccionPendiente();
+                return;
+            }
+            if (!combateTerminado && turnoDeIren && !resolviendoAcciones)
+            {
+                MostrarComandos();
+                return;
+            }
+        }
 
         if (resolviendoAcciones && Time.realtimeSinceStartup - inicioResolucionRealtime > Mathf.Max(2f, tiempoMaximoResolucion))
             RecuperarResolucionAtascada();
 
         if (combateTerminado)
         {
-            if (Keyboard.current != null &&
-                (Keyboard.current.eKey.wasPressedThisFrame || Keyboard.current.enterKey.wasPressedThisFrame || Keyboard.current.spaceKey.wasPressedThisFrame))
+            if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame)
                 ReiniciarCombate();
             return;
         }
@@ -225,14 +270,12 @@ public sealed class CombateUIController : MonoBehaviour
         }
 
         if (Keyboard.current == null || !turnoDeIren || resolviendoAcciones) return;
-        if (Keyboard.current.wKey.wasPressedThisFrame || Keyboard.current.upArrowKey.wasPressedThisFrame || Keyboard.current.leftArrowKey.wasPressedThisFrame)
+        if (Keyboard.current.upArrowKey.wasPressedThisFrame || Keyboard.current.leftArrowKey.wasPressedThisFrame)
             MoverSeleccion(-1);
-        else if (Keyboard.current.sKey.wasPressedThisFrame || Keyboard.current.downArrowKey.wasPressedThisFrame || Keyboard.current.rightArrowKey.wasPressedThisFrame)
+        else if (Keyboard.current.downArrowKey.wasPressedThisFrame || Keyboard.current.rightArrowKey.wasPressedThisFrame)
             MoverSeleccion(1);
-        else if (Keyboard.current.eKey.wasPressedThisFrame || Keyboard.current.enterKey.wasPressedThisFrame || Keyboard.current.spaceKey.wasPressedThisFrame)
+        else if (Keyboard.current.eKey.wasPressedThisFrame)
             ConfirmarSeleccion();
-        else if (Keyboard.current.escapeKey.wasPressedThisFrame || Keyboard.current.backspaceKey.wasPressedThisFrame)
-            MostrarComandos();
     }
 
     private void ProcesarBarrasListas()
@@ -252,11 +295,38 @@ public sealed class CombateUIController : MonoBehaviour
         }
 
         if (aliadoListo == null) return;
+        if (aliadoListo.TurnosParalizado > 0)
+        {
+            aliadoListo.ConsumirParalisis();
+            aliadoListo.ConsumirATB(100f);
+            EscribirRegistro($"{aliadoListo.Nombre} está paralizado y no podrá actuar hasta que termine el combate. Su barra ATB vuelve a cero.");
+            ActualizarEstado();
+        PersonajeCardUI fichaParalizada = fichasPersonaje.FirstOrDefault(f => f != null && f.Personaje == aliadoListo);
+        if (fichaParalizada != null) fichaParalizada.MostrarAvisoDebuff("PARÁLISIS · NO ACTÚA HASTA FIN DEL COMBATE", 6f);
+            ActualizarBarrasATB();
+            resolviendoAcciones = true;
+            inicioResolucionRealtime = Time.realtimeSinceStartup;
+            corutinaResolucion = StartCoroutine(ResolverAccionParalizada(aliadoListo));
+            return;
+        }
         indiceAliadoActual = Array.IndexOf(aliados, aliadoListo);
         SeleccionarAliado(indiceAliadoActual);
         turnoDeIren = true;
         ActualizarIndicadorTurno();
         MostrarComandos();
+    }
+
+    private IEnumerator ResolverAccionParalizada(PersonajeCombate objetivo)
+    {
+        try
+        {
+            if (turnoTexto != null) turnoTexto.text = $"ATB · {objetivo.Nombre.ToUpperInvariant()} PARALIZADO";
+            yield return new WaitForSecondsRealtime(pausaTrasImpacto);
+        }
+        finally
+        {
+            if (!suprimiendoFinalizacion) FinalizarResolucion();
+        }
     }
 
     private void ActualizarBarrasATB()
@@ -271,8 +341,10 @@ public sealed class CombateUIController : MonoBehaviour
             atbEnemigoObjetivo = enemigo.PorcentajeATB;
             if (atbEnemigoTexto != null)
                 atbEnemigoTexto.text = enemigo.ListoParaActuar
-                    ? "GOLEM · ATB LISTO"
+                    ? "GOLEM · LISTO"
                     : $"GOLEM · ATB {Mathf.RoundToInt(enemigo.PorcentajeATB * 100f)}%";
+            if (efectoATBEnemigoTexto != null)
+                efectoATBEnemigoTexto.text = enemigo.AvisoAceleracionATB;
         }
     }
     private void PrepararEventSystem()
@@ -298,9 +370,99 @@ public sealed class CombateUIController : MonoBehaviour
         Conectar(botonPulso, () => EjecutarAtaque(TipoAtaque.PulsoArcano, "Pulso arcano"));
         Conectar(botonVenda, UsarVenda);
         Conectar(botonTonico, UsarTonico);
+        Conectar(botonSales, UsarSalesDeCombate);
+        Conectar(botonVeneno, UsarVenenoConsumible);
+        Conectar(botonEsenciaBestia, AbrirObjetivosEsenciaBestia);
         Conectar(botonVolverAtaques, MostrarComandos);
         Conectar(botonVolverInventario, MostrarComandos);
         Conectar(botonReiniciar, ReiniciarCombate);
+
+        PrepararHover(botonTajo, botonEstocada,
+            botonChispa, botonPulso, botonVenda, botonTonico, botonSales, botonVeneno, botonEsenciaBestia,
+            botonVolverAtaques, botonVolverInventario);
+    }
+
+    private void PrepararHover(params Button[] botones)
+    {
+        foreach (Button boton in botones)
+        {
+            if (boton == null) continue;
+            EventTrigger trigger = boton.GetComponent<EventTrigger>();
+            if (trigger == null) trigger = boton.gameObject.AddComponent<EventTrigger>();
+            if (trigger.triggers == null) trigger.triggers = new List<EventTrigger.Entry>();
+
+            EventTrigger.Entry entrar = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
+            entrar.callback.AddListener(_ => MostrarDescripcionHover(boton));
+            trigger.triggers.Add(entrar);
+
+            EventTrigger.Entry salir = new EventTrigger.Entry { eventID = EventTriggerType.PointerExit };
+            salir.callback.AddListener(_ => OcultarDescripcionHover());
+            trigger.triggers.Add(salir);
+        }
+    }
+
+    private void MostrarDescripcionHover(Button boton)
+    {
+        if (panelDescripcionHover == null || boton == null || !boton.gameObject.activeInHierarchy) return;
+        TMP_Text etiqueta = boton.transform.Find("Label")?.GetComponent<TMP_Text>();
+        TMP_Text detalle = boton.transform.Find("Detail")?.GetComponent<TMP_Text>();
+        string titulo = etiqueta != null && !string.IsNullOrWhiteSpace(etiqueta.text)
+            ? etiqueta.text.Trim()
+            : boton.name;
+        string descripcion = ObtenerDescripcionExacta(boton, detalle != null ? detalle.text : string.Empty);
+
+        if (tituloDescripcionHoverTexto != null) tituloDescripcionHoverTexto.text = titulo;
+        if (cuerpoDescripcionHoverTexto != null) cuerpoDescripcionHoverTexto.text = descripcion;
+        PosicionarDescripcionDebajoDeOpciones();
+        panelDescripcionHover.transform.SetAsLastSibling();
+        panelDescripcionHover.SetActive(true);
+    }
+
+    private string ObtenerDescripcionExacta(Button boton, string detalle)
+    {
+        switch (boton.name)
+        {
+            case "BtnAttack": return "Abre las categorías de ataques. Los normales no gastan PM; las habilidades gastan PM y tienen su propia recuperación ATB.";
+            case "BtnInventory": return "Abre los consumibles. Cada objeto indica aquí su efecto, cantidad restante y coste de recuperación ATB.";
+            case "BtnGuard": return "Defiende al personaje hasta el siguiente ataque enemigo que lo elija. Reduce ese impacto a la mitad y reproduce Outward Block. No consume ATB.";
+            case "BtnVeneno": return $"La dosis suma {personaje?.DuracionVenenoRondas ?? 2} rondas completas de veneno. El GOLEM pierde {personaje?.DanoVenenoPorTurno ?? 5} PV al final de cada ronda. No consume PM ni ATB.";
+            case "BtnEsenciaBestia": return "Elegí a quién atraerá el próximo ataque del GOLEM. Usarla sobre otro aliado cuesta 30 de recuperación ATB; sobre quien la usa no cuesta ATB.";
+            case "BtnBackAttacks":
+            case "BtnBackInventory": return "Cierra este submenú y vuelve a los comandos del personaje.";
+        }
+
+        if (menuActual == MenuActivo.ObjetivosMana && personaje != null && personaje.EsCura)
+            return $"CURA gasta {personaje.CostoRegenerarMana} PM para que el aliado elegido recupere hasta {personaje.CantidadRegenerarMana} PM y adelanta 20 ATB a ese aliado. Recuperación de CURA: 35 ATB.";
+        if (menuActual == MenuActivo.ObjetivosCuracionDoctor && personaje != null && personaje.EsDoctor)
+            return $"DOCTOR gasta {personaje.CostoCuracionDoctor} PM para recuperar hasta {personaje.CantidadCuracionDoctor} PV al aliado elegido. Recuperación de DOCTOR: 55 ATB.";
+
+        if (string.IsNullOrWhiteSpace(detalle))
+        {
+            if (boton == botonTajo || boton == botonEstocada || boton == botonChispa || boton == botonPulso)
+                return "Acción disponible para " + (personaje != null ? personaje.Nombre : "este personaje") + ". Revisa sus requisitos de PV, PM y ATB antes de elegir.";
+            return "Selecciona esta opción para realizar la acción indicada.";
+        }
+        return detalle.Trim();
+    }
+
+    private void PosicionarDescripcionDebajoDeOpciones()
+    {
+        RectTransform descripcion = panelDescripcionHover != null ? panelDescripcionHover.transform as RectTransform : null;
+        if (descripcion == null) return;
+        float bordeInferior = -82f;
+        foreach (Button boton in botonesActivos)
+        {
+            if (boton == null || !boton.gameObject.activeInHierarchy) continue;
+            RectTransform rect = boton.transform as RectTransform;
+            if (rect == null) continue;
+            bordeInferior = Mathf.Min(bordeInferior, rect.anchoredPosition.y - rect.rect.height);
+        }
+        descripcion.anchoredPosition = new Vector2(16f, bordeInferior - 10f);
+    }
+
+    private void OcultarDescripcionHover()
+    {
+        if (panelDescripcionHover != null) panelDescripcionHover.SetActive(false);
     }
 
     private void ConfigurarAccionesAtaque()
@@ -314,7 +476,7 @@ public sealed class CombateUIController : MonoBehaviour
         {
             CambiarTextoBoton(botonTajo, "TAJO DE ESPADA", "7–10 daño · 0 PM · ATB 24");
             CambiarTextoBoton(botonEstocada, "CORTE PESADO", $"11–15 daño · {personaje.CostoAtaquePesadoEsqueleto} PM · ATB 64");
-            CambiarTextoBoton(botonChispa, "GUARDIA REFLEJA", $"Devuelve el próximo golpe · {personaje.CostoContraataque} PM · ATB 48");
+            CambiarTextoBoton(botonChispa, "GUARDIA REFLEJA", $"Devuelve el próximo golpe · {personaje.CostoContraataque} PM · sin recuperación ATB adicional");
             CambiarTextoBoton(botonPulso, "", "");
             if (botonPulso != null) botonPulso.gameObject.SetActive(false);
             if (encabezadoNormalesTexto != null) encabezadoNormalesTexto.text = "ATAQUES DE ESPADA";
@@ -326,7 +488,7 @@ public sealed class CombateUIController : MonoBehaviour
         else if (personaje != null && personaje.EsCura)
         {
             CambiarTextoBoton(botonTajo, "GOLPE DE BÁCULO", "5–8 daño · 0 PM · ATB 26");
-            CambiarTextoBoton(botonEstocada, "RAYO SAGRADO", "22–27 daño · 10 PM · ATB 58");
+            CambiarTextoBoton(botonEstocada, "RAYO SAGRADO", "22–27 daño · 11 PM · ATB 70");
             CambiarTextoBoton(botonChispa, "REGENERAR PM", $"Cuesta {personaje.CostoRegenerarMana} PM · +{personaje.CantidadRegenerarMana} PM · +20 ATB · coste ATB 35");
             CambiarTextoBoton(botonPulso, "", "");
             if (botonPulso != null) botonPulso.gameObject.SetActive(false);
@@ -340,7 +502,11 @@ public sealed class CombateUIController : MonoBehaviour
         {
             CambiarTextoBoton(botonTajo, "TAJO", "7–10 daño · 0 PM · ATB 24");
             CambiarTextoBoton(botonEstocada, "ESTOCADA", "11–15 daño · 0 PM · ATB 36");
-            CambiarTextoBoton(botonChispa, "CHISPA UMBRÍA", "15–19 daño · 6 PM · ATB 42");
+            CambiarTextoBoton(botonChispa,
+                personaje != null && personaje.EsDoctor ? "GOLPE DE IMPULSO" : "CHISPA UMBRÍA",
+                personaje != null && personaje.EsDoctor
+                    ? $"{personaje.DanoImpulsoMinimo}–{personaje.DanoImpulsoMaximo} daño · {personaje.CostoImpulsoMana} PM · ATB 65 · GOLEM +{personaje.AceleracionATBImpulso:P0} velocidad"
+                    : "15–19 daño · 6 PM · ATB 42");
             CambiarTextoBoton(botonPulso,
                 personaje != null && personaje.EsDoctor ? "SANACIÓN ALQUÍMICA" : "PULSO ARCANO",
                 personaje != null && personaje.EsDoctor
@@ -351,7 +517,10 @@ public sealed class CombateUIController : MonoBehaviour
             if (encabezadoEspecialesTexto != null) encabezadoEspecialesTexto.text = "ESPECIALES   ·   GASTAN PM";
             Conectar(botonTajo, () => EjecutarAtaque(TipoAtaque.Tajo, "Tajo"));
             Conectar(botonEstocada, () => EjecutarAtaque(TipoAtaque.Estocada, "Estocada"));
-            Conectar(botonChispa, () => EjecutarAtaque(TipoAtaque.ChispaUmbria, "Chispa umbría"));
+            if (personaje != null && personaje.EsDoctor)
+                Conectar(botonChispa, () => EjecutarAtaque(TipoAtaque.GolpeImpulsor, "Golpe de impulso"));
+            else
+                Conectar(botonChispa, () => EjecutarAtaque(TipoAtaque.ChispaUmbria, "Chispa umbría"));
             if (personaje != null && personaje.EsDoctor)
                 Conectar(botonPulso, AbrirObjetivosCuracionDoctor);
             else
@@ -407,7 +576,7 @@ public sealed class CombateUIController : MonoBehaviour
         ActivarMenu(menuAtaques);
         if (tituloAtaquesTexto != null) tituloAtaquesTexto.text = "SANACIÓN ALQUÍMICA   ·   ELEGIR ALIADO";
         if (encabezadoNormalesTexto != null) encabezadoNormalesTexto.text = "ELIGE A QUIÉN CURAR";
-        if (encabezadoEspecialesTexto != null) encabezadoEspecialesTexto.text = "FLECHAS / W S · E / ENTER / ESPACIO · CLICK";
+        if (encabezadoEspecialesTexto != null) encabezadoEspecialesTexto.text = string.Empty;
 
         Button[] botonesObjetivo = { botonTajo, botonEstocada, botonChispa, botonPulso };
         List<Button> seleccionables = new List<Button>();
@@ -445,10 +614,12 @@ public sealed class CombateUIController : MonoBehaviour
 
     private void CurarConDoctor(PersonajeCombate objetivo)
     {
-        if (!PuedeActuar() || personaje == null || !personaje.CurarConMana(objetivo, out int recuperado)) return;
+        if (!PuedeActuar() || personaje == null || objetivo == null || objetivo.Vida <= 0 || personaje.Mana < personaje.CostoCuracionDoctor) return;
         seleccionandoObjetivoCuracionDoctor = false;
         LimpiarObjetivosCuracionDoctor();
-        IniciarResolucion($"{personaje.Nombre} usa Sanación alquímica sobre {objetivo.Nombre}: +{recuperado} PV.", false, 55f);
+        IniciarResolucion(() => personaje.CurarConMana(objetivo, out int recuperado)
+            ? $"{personaje.Nombre} usa Sanación alquímica sobre {objetivo.Nombre}: +{recuperado} PV."
+            : string.Empty, 55f);
     }
 
     private void ActualizarIndicadorObjetivoCuracionDoctor()
@@ -470,10 +641,15 @@ public sealed class CombateUIController : MonoBehaviour
 
     private void RegenerarMana(PersonajeCombate objetivo)
     {
-        if (!PuedeActuar() || personaje == null || !personaje.UsarRegenerarMana(objetivo, out int recuperado)) return;
-        IniciarResolucion($"{personaje.Nombre} regenera {recuperado} PM de {objetivo.Nombre} y acelera su ATB +20.", false, 35f);
-        objetivo.AcelerarATB(20f);
-        ActualizarBarrasATB();
+        if (!PuedeActuar() || personaje == null || objetivo == null || objetivo.Vida <= 0 || personaje.Mana < personaje.CostoRegenerarMana) return;
+        IniciarResolucion(() =>
+        {
+            if (!personaje.UsarRegenerarMana(objetivo, out int recuperadoAhora)) return string.Empty;
+            objetivo.AcelerarATB(20f);
+            PersonajeCardUI fichaAcelerada = fichasPersonaje.FirstOrDefault(f => f != null && f.Personaje == objetivo);
+            if (fichaAcelerada != null) fichaAcelerada.MostrarAvisoATB("+20 ATB · ACELERADO");
+            return $"{personaje.Nombre} regenera {recuperadoAhora} PM de {objetivo.Nombre} y acelera su ATB +20.";
+        }, 35f);
     }
 
     private static void CambiarTextoBoton(Button boton, string titulo, string detalle)
@@ -574,11 +750,13 @@ public sealed class CombateUIController : MonoBehaviour
         }
         if (personaje.EsCura) MostrarBotonesAtaque(botonEstocada, botonChispa);
         else if (personaje.EsEsqueleto) MostrarBotonesAtaque(botonEstocada, botonChispa);
+            else if (personaje.EsDoctor) MostrarBotonesAtaque(botonChispa, botonPulso);
         else MostrarBotonesAtaque(botonChispa, botonPulso);
         CambiarTextoBoton(botonVolverAtaques, "VOLVER A CATEGORÍAS", "");
         Conectar(botonVolverAtaques, AbrirAtaques);
         if (personaje.EsCura) ConfigurarSeleccion(botonEstocada, botonChispa, botonVolverAtaques);
         else if (personaje.EsEsqueleto) ConfigurarSeleccion(botonEstocada, botonChispa, botonVolverAtaques);
+        else if (personaje.EsDoctor) ConfigurarSeleccion(botonChispa, botonPulso, botonVolverAtaques);
         else ConfigurarSeleccion(botonChispa, botonPulso, botonVolverAtaques);
     }
 
@@ -595,11 +773,46 @@ public sealed class CombateUIController : MonoBehaviour
         menuActual = MenuActivo.Inventario;
         ActivarMenu(menuInventario);
         ActualizarDisponibilidad();
-        ConfigurarSeleccion(botonVenda, botonTonico, botonVolverInventario);
+        ConfigurarSeleccion(botonVenda, botonTonico, botonSales, botonVeneno, botonEsenciaBestia, botonVolverInventario);
+    }
+
+    private void AbrirObjetivosEsenciaBestia()
+    {
+        if (!PuedeActuar() || personaje == null || personaje.EsenciasBestia <= 0 || enemigo == null || enemigo.Vida <= 0) return;
+        menuActual = MenuActivo.ObjetivosEsenciaBestia;
+        ActivarMenu(menuAtaques);
+        if (tituloAtaquesTexto != null) tituloAtaquesTexto.text = "ESCENCIA DE BESTIA · ELEGIR ALIADO";
+        if (encabezadoNormalesTexto != null) encabezadoNormalesTexto.text = "EL PRÓXIMO ATAQUE DEL GOLEM IRÁ A ESTE ALIADO";
+        if (encabezadoEspecialesTexto != null) encabezadoEspecialesTexto.text = string.Empty;
+
+        Button[] botonesObjetivo = { botonTajo, botonEstocada, botonChispa, botonPulso };
+        List<Button> seleccionables = new List<Button>();
+        int indice = 0;
+        foreach (PersonajeCombate aliado in aliados)
+        {
+            if (aliado == null || aliado.Vida <= 0 || indice >= botonesObjetivo.Length) continue;
+            Button boton = botonesObjetivo[indice++];
+            boton.gameObject.SetActive(true);
+            string detalle = aliado == personaje
+                ? "Próximo ataque del GOLEM a este personaje · sin coste de ATB"
+                : "Próximo ataque del GOLEM a este personaje · recuperación ATB 30";
+            CambiarTextoBoton(boton, aliado.Nombre.ToUpperInvariant(), detalle);
+            boton.interactable = true;
+            Conectar(boton, () => UsarEsenciaBestia(aliado));
+            seleccionables.Add(boton);
+        }
+        for (int i = indice; i < botonesObjetivo.Length; i++)
+            botonesObjetivo[i].gameObject.SetActive(false);
+
+        CambiarTextoBoton(botonVolverAtaques, "VOLVER AL INVENTARIO", string.Empty);
+        Conectar(botonVolverAtaques, AbrirInventario);
+        seleccionables.Add(botonVolverAtaques);
+        ConfigurarSeleccion(seleccionables.ToArray());
     }
 
     private void ActivarMenu(GameObject menu)
     {
+        OcultarDescripcionHover();
         if (menuActual != MenuActivo.ObjetivosCuracionDoctor && seleccionandoObjetivoCuracionDoctor)
         {
             seleccionandoObjetivoCuracionDoctor = false;
@@ -672,59 +885,112 @@ public sealed class CombateUIController : MonoBehaviour
 
     private void EjecutarAtaque(TipoAtaque tipo, string nombreAtaque)
     {
-        if (!PuedeActuar() || enemigo == null || enemigo.Vida <= 0) return;
-        if (!personaje.UsarAtaque(tipo, out int dano)) return;
+        if (!PuedeActuar() || enemigo == null || enemigo.Vida <= 0 || !personaje.PuedeUsarAtaque(tipo)) return;
+        IniciarResolucion(() =>
+        {
+            if (!personaje.UsarAtaque(tipo, out int dano)) return string.Empty;
+            enemigo.RecibirDano(dano);
+            string accion = $"{personaje.Nombre} usa {nombreAtaque}: {dano} de daño.";
+            if (tipo == TipoAtaque.GolpeImpulsor)
+            {
+                bool aceleraEsteLlenado = enemigo.ATB < 100f;
+                enemigo.AcelerarProximaRecuperacionATB(personaje.AceleracionATBImpulso);
+                accion += aceleraEsteLlenado
+                    ? $" El próximo llenado ATB del GOLEM va {personaje.AceleracionATBImpulso:P0} más rápido."
+                    : $" El llenado ATB posterior del GOLEM irá {personaje.AceleracionATBImpulso:P0} más rápido.";
+            }
+            if (enemigo.Vida <= 0) accion += " El GOLEM cae.";
+            return accion;
+        }, ObtenerCostoRecuperacion(tipo));
+    }
 
-        enemigo.RecibirDano(dano);
-        ActualizarEstado();
-        string accion = $"{personaje.Nombre} usa {nombreAtaque}: {dano} de daño.";
-        if (enemigo.Vida <= 0) accion += " El GOLEM cae.";
-        IniciarResolucion(accion, false, ObtenerCostoRecuperacion(tipo));
+    private void UsarSalesDeCombate()
+    {
+        if (!PuedeActuar() || personaje == null || personaje.Sales <= 0) return;
+        IniciarResolucion(() => !personaje.UsarSalesDeCombate() ? string.Empty : $"{personaje.Nombre} usa Sales de combate: daño +{personaje.PorcentajeBuffSales:P0} durante sus próximos {personaje.DuracionSalesAtaques} ataques.", 32f);
+    }
+
+    private void UsarVenenoConsumible()
+    {
+        if (!PuedeActuar() || personaje == null || personaje.Venenos <= 0 || enemigo == null || enemigo.Vida <= 0) return;
+        ActivarMenu(null);
+        IniciarResolucion(() => !personaje.UsarVeneno(enemigo) ? string.Empty :
+            $"{personaje.Nombre} usa Veneno: añade {personaje.DuracionVenenoRondas} rondas completas; el GOLEM pierde {enemigo.DanoVeneno} PV al final de cada ronda. Quedan {enemigo.RondasVenenoRestantes} rondas. No consume PM ni ATB.", 0f, false);
+    }
+
+    private void UsarEsenciaBestia(PersonajeCombate objetivo)
+    {
+        if (!PuedeActuar() || personaje == null || objetivo == null || objetivo.Vida <= 0 || enemigo == null || enemigo.Vida <= 0) return;
+        bool sobreSiMismo = objetivo == personaje;
+        ActivarMenu(null);
+        IniciarResolucion(() =>
+        {
+            if (!personaje.UsarEsenciaBestia()) return string.Empty;
+            enemigo.ForzarProximoObjetivo(objetivo);
+            return $"{personaje.Nombre} usa Escencia de bestia sobre {objetivo.Nombre}: el próximo ataque del GOLEM lo tendrá como objetivo" +
+                (sobreSiMismo ? ". No consume ATB." : ". Recuperación ATB: 30.");
+        }, sobreSiMismo ? 0f : 30f, !sobreSiMismo);
     }
     private void UsarVenda()
     {
-        if (!PuedeActuar() || !personaje.UsarVenda(out int curacion)) return;
-        IniciarResolucion($"{personaje.Nombre} usa Venda amarga y recupera {curacion} PV.", false, 30f);
+        if (!PuedeActuar() || personaje.Vendas <= 0 || personaje.Vida >= personaje.VidaMaxima) return;
+        IniciarResolucion(() => !personaje.UsarVenda(out int curacion) ? string.Empty : $"{personaje.Nombre} usa Venda amarga y recupera {curacion} PV.", 30f);
     }
 
     private void UsarTonico()
     {
-        if (!PuedeActuar() || !personaje.UsarTonico(out int recuperacion)) return;
-        IniciarResolucion($"{personaje.Nombre} usa Tónico de luciérnaga y recupera {recuperacion} PM; adelanta 12 ATB.", false, 28f);
-        personaje.AcelerarATB(12f);
-        ActualizarBarrasATB();
+        if (!PuedeActuar() || personaje.Tonicos <= 0 || personaje.Mana >= personaje.ManaMaximo) return;
+        IniciarResolucion(() =>
+        {
+            if (!personaje.UsarTonico(out int recuperacion)) return string.Empty;
+            personaje.AcelerarATB(12f);
+            PersonajeCardUI fichaAcelerada = fichasPersonaje.FirstOrDefault(f => f != null && f.Personaje == personaje);
+            if (fichaAcelerada != null) fichaAcelerada.MostrarAvisoATB("+12 ATB · ACELERADO");
+            return $"{personaje.Nombre} usa Tónico de luciérnaga y recupera {recuperacion} PM; adelanta 12 ATB.";
+        }, 28f);
     }
 
     private void Defenderse()
     {
         if (!PuedeActuar()) return;
-        personajesDefendidos.Add(personaje);
-        personaje.ReproducirDefensa();
-        IniciarResolucion($"{personaje.Nombre} se defiende.", true, 20f);
+        IniciarResolucion(() =>
+        {
+            personajesDefendidos.Add(personaje);
+            personaje.ReproducirDefensa();
+            return $"{personaje.Nombre} se defiende.";
+        }, 0f);
     }
 
     private void PrepararContraataque()
     {
-        if (!PuedeActuar() || personaje == null || !personaje.PrepararContraataque()) return;
-        IniciarResolucion($"{personaje.Nombre} prepara Guardia refleja y consume {personaje.CostoContraataque} PM.", false, 48f);
+        if (!PuedeActuar() || personaje == null || personaje.Mana < personaje.CostoContraataque) return;
+        IniciarResolucion(() => !personaje.PrepararContraataque() ? string.Empty : $"{personaje.Nombre} prepara Guardia refleja y consume {personaje.CostoContraataque} PM.", 0f);
     }
 
-    private void IniciarResolucion(string accion, bool defensa, float costoRecuperacion = 30f)
+    private void IniciarResolucion(Func<string> ejecutar, float costoRecuperacion = 30f, bool consumirATB = true)
     {
         if (!PuedeActuar() || resolviendoAcciones || personaje == null) return;
-        personaje.ConsumirATB(costoRecuperacion);
-        ActualizarBarrasATB();
+        OcultarDescripcionHover();
         resolviendoAcciones = true;
-        turnoDeIren = false;
+        accionCancelable = true;
+        int id = ++idResolucion;
         inicioResolucionRealtime = Time.realtimeSinceStartup;
         BloquearBotones(true);
-        corutinaResolucion = StartCoroutine(ResolverAccionJugador(accion));
+        corutinaResolucion = StartCoroutine(ResolverAccionJugador(ejecutar, costoRecuperacion, consumirATB, id));
     }
 
-    private IEnumerator ResolverAccionJugador(string accion)
+    private IEnumerator ResolverAccionJugador(Func<string> ejecutar, float costoRecuperacion, bool consumirATB, int id)
     {
+        yield return new WaitForSecondsRealtime(ventanaCancelarAccion);
+        if (id != idResolucion || !accionCancelable) yield break;
+        accionCancelable = false;
+        turnoDeIren = false;
         try
         {
+            string accion = ejecutar != null ? ejecutar() : string.Empty;
+            if (string.IsNullOrWhiteSpace(accion)) yield break;
+            if (consumirATB) personaje.ConsumirATB(costoRecuperacion);
+            ActualizarBarrasATB();
             EscribirRegistro(accion);
             ActualizarEstado();
             if (turnoTexto != null) turnoTexto.text = $"ATB · ACCIÓN DE {personaje.Nombre.ToUpperInvariant()}";
@@ -743,8 +1009,20 @@ public sealed class CombateUIController : MonoBehaviour
         }
         finally
         {
-            if (!suprimiendoFinalizacion) FinalizarResolucion();
+            if (!suprimiendoFinalizacion && id == idResolucion) FinalizarResolucion();
         }
+    }
+
+    private void CancelarAccionPendiente()
+    {
+        if (!accionCancelable) return;
+        accionCancelable = false;
+        ++idResolucion;
+        corutinaResolucion = null;
+        resolviendoAcciones = false;
+        turnoDeIren = true;
+        DesbloquearTodosLosBotones();
+        MostrarComandos();
     }
 
     private void StartResolucionEnemigoATB()
@@ -762,9 +1040,10 @@ public sealed class CombateUIController : MonoBehaviour
         try
         {
             int cantidadAtaques = EsRondaDeAtaqueDoble() ? 2 : 1;
+            float costoATBTotalEnemigo = 0f;
             EscribirRegistro(cantidadAtaques == 2
-                ? $"Turno enemigo {turno}: ¡combo de {cantidadAtaques} ataques!"
-                : $"Turno enemigo {turno}: {enemigo.Nombre} prepara su acción.");
+                ? $"Ronda {turno}: ¡combo de {cantidadAtaques} ataques del GOLEM!"
+                : $"Ronda {turno}: {enemigo.Nombre} prepara su acción.");
             for (int numeroAtaque = 1; numeroAtaque <= cantidadAtaques; numeroAtaque++)
             {
                 if (enemigo == null || enemigo.Vida <= 0)
@@ -788,14 +1067,14 @@ public sealed class CombateUIController : MonoBehaviour
                 }
 
                 if (turnoTexto != null)
-                    turnoTexto.text = $"ATB · TURNO ENEMIGO {turno:00} · {numeroAtaque}/{cantidadAtaques}";
+                    turnoTexto.text = $"ATB · RONDA {turno:00} · ATAQUE {numeroAtaque}/{cantidadAtaques}";
                 EscribirRegistro($"¡{enemigo.Nombre} prepara ataque {numeroAtaque}/{cantidadAtaques}: {pendiente.nombreAtaque} contra {pendiente.objetivo.Nombre}{(pendiente.costoMana > 0 ? $" ({pendiente.costoMana} PM)" : string.Empty)}!");
                 yield return new WaitForSecondsRealtime(pausaDePreparacion);
 
                 float costoATBEnemigo = pendiente.costoMana > 0 ? 44f : 32f;
+                costoATBTotalEnemigo += costoATBEnemigo;
                 EscribirRegistro($"Recuperación del GOLEM: {costoATBEnemigo:0} ATB tras esta acción.");
                 ResultadoAccionEnemiga resultado = enemigo.EjecutarAccion(pendiente);
-                enemigo.ConsumirATB(costoATBEnemigo);
                 ActualizarEstado();
                 ActualizarBarrasATB();
                 if (turnoTexto != null)
@@ -806,6 +1085,8 @@ public sealed class CombateUIController : MonoBehaviour
                     EscribirRegistro($"Ataque {numeroAtaque}/{cantidadAtaques}: {enemigo.Nombre} usa {resultado.nombreAtaque} contra {resultado.objetivo.Nombre}: -{resultado.dano} PV (quedan {resultado.objetivo.Vida}/{resultado.objetivo.VidaMaxima}){(resultado.objetivoDefendido ? "; defensa reduce el daño" : "")}.");
                 else
                     EscribirRegistro($"Ataque {numeroAtaque}/{cantidadAtaques}: {enemigo.Nombre} no encuentra un objetivo.");
+                if (resultado.paralisisAplicada && resultado.objetivo != null)
+                    EscribirRegistro($"{resultado.objetivo.Nombre} queda paralizado: perderá su próxima acción ATB.");
 
                 if (TodosLosPersonajesDerrotados(aliados))
                 {
@@ -823,7 +1104,29 @@ public sealed class CombateUIController : MonoBehaviour
                     yield return new WaitForSecondsRealtime(pausaTrasImpacto);
             }
 
+            enemigo.ConsumirATB(costoATBTotalEnemigo);
+            ActualizarBarrasATB();
+            EscribirRegistro($"Recuperación total ATB del GOLEM: {costoATBTotalEnemigo:0}.");
             personajesDefendidos.Clear();
+            yield return new WaitForSecondsRealtime(pausaTrasImpacto * 0.5f);
+
+            int danoVeneno = enemigo.ProcesarVenenoAlFinalDeRonda();
+            if (danoVeneno > 0)
+            {
+                EscribirRegistro($"Fin de ronda {turno}: VENENO hace {danoVeneno} de daño a {enemigo.Nombre} ({enemigo.Vida}/{enemigo.VidaMaxima} PV)." +
+                    (enemigo.RondasVenenoRestantes > 0 ? $" Quedan {enemigo.RondasVenenoRestantes} rondas completas." : " El efecto de veneno termina."));
+                MostrarAvisoDanoVeneno(danoVeneno);
+                MostrarAvisoDebuffEnemigo(enemigo.RondasVenenoRestantes > 0
+                    ? $"VENENO · -{enemigo.DanoVeneno} PV · {enemigo.RondasVenenoRestantes} rondas restantes"
+                    : "VENENO · efecto terminado", 5f);
+                ActualizarEstado();
+                if (enemigo.Vida <= 0)
+                {
+                    TerminarCombate(true);
+                    yield break;
+                }
+            }
+
             turno++;
             yield return new WaitForSecondsRealtime(pausaTrasImpacto);
             EscribirRegistro($"ATB: continúa el siguiente turno. ({enemigo.Nombre}, velocidad {enemigo.VelocidadATB}).");
@@ -845,7 +1148,8 @@ public sealed class CombateUIController : MonoBehaviour
                 return personaje != null && personaje.EsEsqueleto ? 48f : 42f;
             case TipoAtaque.PulsoArcano: return personaje != null && personaje.EsDoctor ? 55f : 62f;
             case TipoAtaque.GolpeBaculo: return 26f;
-            case TipoAtaque.RayoSagrado: return 58f;
+            case TipoAtaque.RayoSagrado: return 70f;
+            case TipoAtaque.GolpeImpulsor: return 65f;
             default: return 30f;
         }
     }
@@ -870,6 +1174,8 @@ public sealed class CombateUIController : MonoBehaviour
     private void RecuperarResolucionAtascada()
     {
         if (!resolviendoAcciones) return;
+        accionCancelable = false;
+        ++idResolucion;
         suprimiendoFinalizacion = true;
         if (corutinaResolucion != null) StopCoroutine(corutinaResolucion);
         corutinaResolucion = null;
@@ -892,7 +1198,7 @@ public sealed class CombateUIController : MonoBehaviour
         {
             botonAtacar, botonInventario, botonDefenderse,
             botonTajo, botonEstocada, botonChispa, botonPulso, botonVolverAtaques,
-            botonVenda, botonTonico, botonVolverInventario, botonReiniciar
+            botonVenda, botonTonico, botonSales, botonVeneno, botonEsenciaBestia, botonVolverInventario, botonReiniciar
         };
         foreach (Button boton in botones)
             if (boton != null) boton.interactable = true;
@@ -901,16 +1207,23 @@ public sealed class CombateUIController : MonoBehaviour
     private void ActualizarDisponibilidad()
     {
         if (botonTajo != null) botonTajo.interactable = personaje != null;
-        if (botonEstocada != null) botonEstocada.interactable = personaje != null && (personaje.EsEsqueleto ? personaje.Mana >= personaje.CostoAtaquePesadoEsqueleto : !personaje.EsCura || personaje.Mana >= 10);
+        if (botonEstocada != null) botonEstocada.interactable = personaje != null && (personaje.EsEsqueleto ? personaje.Mana >= personaje.CostoAtaquePesadoEsqueleto : !personaje.EsCura || personaje.Mana >= 11);
         if (botonChispa != null) botonChispa.interactable = personaje != null && (personaje.EsEsqueleto
             ? personaje.Mana >= personaje.CostoContraataque
-            : personaje.EsCura ? personaje.Mana >= personaje.CostoRegenerarMana : personaje.Mana >= 6);
+            : personaje.EsCura ? personaje.Mana >= personaje.CostoRegenerarMana
+            : personaje.EsDoctor ? personaje.Mana >= personaje.CostoImpulsoMana : personaje.Mana >= 6);
         if (botonPulso != null) botonPulso.interactable = personaje != null &&
             (personaje.EsDoctor ? personaje.Mana >= personaje.CostoCuracionDoctor : !personaje.EsCura && personaje.Mana >= 10);
         if (botonVenda != null) botonVenda.interactable = personaje != null && personaje.Vendas > 0 && personaje.Vida < personaje.VidaMaxima;
         if (botonTonico != null) botonTonico.interactable = personaje != null && personaje.Tonicos > 0 && personaje.Mana < personaje.ManaMaximo;
+        if (botonSales != null) botonSales.interactable = personaje != null && personaje.Sales > 0;
+        if (botonVeneno != null) botonVeneno.interactable = personaje != null && personaje.Venenos > 0 && enemigo != null && enemigo.Vida > 0;
+        if (botonEsenciaBestia != null) botonEsenciaBestia.interactable = personaje != null && personaje.EsenciasBestia > 0 && enemigo != null && enemigo.Vida > 0;
         ActualizarDetalle(botonVenda, personaje != null ? $"Recupera 14 PV · QUEDAN {personaje.Vendas} · ATB 30" : string.Empty);
         ActualizarDetalle(botonTonico, personaje != null ? $"Recupera 8 PM · QUEDAN {personaje.Tonicos} · ATB 28 · +12 ATB" : string.Empty);
+        ActualizarDetalle(botonSales, personaje != null ? $"Daño +{personaje.PorcentajeBuffSales:P0} durante {personaje.DuracionSalesAtaques} ataques · QUEDAN {personaje.Sales} · ATB 32" : string.Empty);
+        ActualizarDetalle(botonVeneno, personaje != null ? $"Añade {personaje.DuracionVenenoRondas} rondas de -{personaje.DanoVenenoPorTurno} PV al final de cada ronda · QUEDAN {personaje.Venenos} · 0 PM · 0 ATB" : string.Empty);
+        ActualizarDetalle(botonEsenciaBestia, personaje != null ? $"El próximo ataque del GOLEM apunta al aliado elegido · QUEDAN {personaje.EsenciasBestia} · en uno mismo: 0 ATB; en otro: ATB 30" : string.Empty);
         if (personaje != null && personaje.EsDoctor)
             ActualizarDetalle(botonPulso, $"{personaje.CostoCuracionDoctor} PM · recupera hasta {personaje.CantidadCuracionDoctor} PV · ATB 55");
     }
@@ -919,6 +1232,23 @@ public sealed class CombateUIController : MonoBehaviour
     {
         TMP_Text detail = boton != null ? boton.transform.Find("Detail")?.GetComponent<TMP_Text>() : null;
         if (detail != null) detail.text = texto;
+    }
+
+    private Button CrearBotonConsumible(string nombre, Vector2 posicion, string titulo, string detalle)
+    {
+        if (botonTonico == null || botonTonico.transform.parent == null) return null;
+        GameObject objeto = Instantiate(botonTonico.gameObject, botonTonico.transform.parent, false);
+        objeto.name = nombre;
+        RectTransform rect = objeto.GetComponent<RectTransform>();
+        rect.anchorMin = rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 1f);
+        rect.anchoredPosition = posicion;
+        rect.sizeDelta = new Vector2(455f, 68f);
+        TMP_Text textoTitulo = objeto.transform.Find("Label")?.GetComponent<TMP_Text>();
+        TMP_Text textoDetalle = objeto.transform.Find("Detail")?.GetComponent<TMP_Text>();
+        if (textoTitulo != null) textoTitulo.text = titulo;
+        if (textoDetalle != null) textoDetalle.text = detalle;
+        return objeto.GetComponent<Button>();
     }
 
     private void ActualizarEstado()
@@ -938,6 +1268,14 @@ public sealed class CombateUIController : MonoBehaviour
                     vidaEnemigoInicializada = true;
                 }
             }
+            if (debuffEnemigoTexto != null)
+            {
+                string estadoPersistente = enemigo.RondasVenenoRestantes > 0
+                    ? $"VENENO · -{enemigo.DanoVeneno} PV por ronda · {enemigo.RondasVenenoRestantes} rondas restantes"
+                    : Time.unscaledTime < avisoDebuffEnemigoHasta ? avisoDebuffEnemigo : string.Empty;
+                debuffEnemigoTexto.text = estadoPersistente;
+                debuffEnemigoTexto.gameObject.SetActive(!string.IsNullOrEmpty(estadoPersistente));
+            }
         }
         if (fichasPersonaje != null)
         {
@@ -947,8 +1285,29 @@ public sealed class CombateUIController : MonoBehaviour
         ActualizarDisponibilidad();
     }
 
+    private void MostrarAvisoDebuffEnemigo(string texto, float duracion = 3f)
+    {
+        avisoDebuffEnemigo = texto;
+        avisoDebuffEnemigoHasta = Time.unscaledTime + Mathf.Max(0.1f, duracion);
+        if (debuffEnemigoTexto != null && (enemigo == null || enemigo.RondasVenenoRestantes <= 0))
+        {
+            debuffEnemigoTexto.text = texto;
+            debuffEnemigoTexto.gameObject.SetActive(true);
+        }
+    }
+
+    private void MostrarAvisoDanoVeneno(int dano)
+    {
+        avisoDanoVenenoHasta = Time.unscaledTime + 4f;
+        if (avisoDanoVenenoTexto == null) return;
+        avisoDanoVenenoTexto.text = $"¡VENENO! GOLEM pierde {dano} PV";
+        avisoDanoVenenoTexto.gameObject.SetActive(true);
+    }
+
     private void TerminarCombate(bool victoria)
     {
+        accionCancelable = false;
+        ++idResolucion;
         combateTerminado = true;
         turnoDeIren = false;
         resolviendoAcciones = false;
@@ -969,6 +1328,8 @@ public sealed class CombateUIController : MonoBehaviour
 
     private void ReiniciarCombate()
     {
+        accionCancelable = false;
+        ++idResolucion;
         suprimiendoFinalizacion = true;
         if (corutinaResolucion != null) StopCoroutine(corutinaResolucion);
         corutinaResolucion = null;
