@@ -1,0 +1,93 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4542a25069bd6a5428ef256ed18c3200, type: 3}
+  m_Name: DoctorVFX
+  m_EditorClassIdentifier: Assembly-CSharp::ConfiguracionVFXCombate
+  personaje: DOCTOR
+  acciones:
+  - accion: 0
+    prefab: {fileID: 2944396702758532163, guid: e190bf97c041e58448af6b043116cba0, type: 3}
+    usarObjetivo: 1
+    seguirPuntoDeAparicion: 0
+    desplazamiento: {x: 0, y: 1, z: 1}
+    rotacionEuler: {x: 0, y: 1, z: 1}
+    duracionSegundos: 1
+  - accion: 1
+    prefab: {fileID: 8915312667134092580, guid: 8a43d9f68490c374a93a9e8085555c02, type: 3}
+    usarObjetivo: 1
+    seguirPuntoDeAparicion: 1
+    desplazamiento: {x: 0, y: 1, z: 0}
+    rotacionEuler: {x: 0, y: 1, z: 0}
+    duracionSegundos: 1
+  - accion: 2
+    prefab: {fileID: 7478731271839673279, guid: 4d3c8045dd8857a4b8d34c2361c61045, type: 3}
+    usarObjetivo: 1
+    seguirPuntoDeAparicion: 1
+    desplazamiento: {x: 0, y: 0, z: 0}
+    rotacionEuler: {x: 0, y: 0, z: 0}
+    duracionSegundos: 2
+  - accion: 3
+    prefab: {fileID: 9017484664307500583, guid: 1245b8d2997d5b34fb1637be70a7eb05, type: 3}
+    usarObjetivo: 1
+    seguirPuntoDeAparicion: 1
+    desplazamiento: {x: 0, y: 0, z: 0}
+    rotacionEuler: {x: 0, y: 0, z: 0}
+    duracionSegundos: 2
+  - accion: 10
+    prefab: {fileID: 0}
+    usarObjetivo: 0
+    seguirPuntoDeAparicion: 0
+    desplazamiento: {x: 0, y: 0, z: 0}
+    rotacionEuler: {x: 0, y: 0, z: 0}
+    duracionSegundos: 4
+  - accion: 11
+    prefab: {fileID: 0}
+    usarObjetivo: 0
+    seguirPuntoDeAparicion: 0
+    desplazamiento: {x: 0, y: 0, z: 0}
+    rotacionEuler: {x: 0, y: 0, z: 0}
+    duracionSegundos: 4
+  - accion: 12
+    prefab: {fileID: 0}
+    usarObjetivo: 0
+    seguirPuntoDeAparicion: 0
+    desplazamiento: {x: 0, y: 0, z: 0}
+    rotacionEuler: {x: 0, y: 0, z: 0}
+    duracionSegundos: 4
+  - accion: 13
+    prefab: {fileID: 0}
+    usarObjetivo: 0
+    seguirPuntoDeAparicion: 0
+    desplazamiento: {x: 0, y: 0, z: 0}
+    rotacionEuler: {x: 0, y: 0, z: 0}
+    duracionSegundos: 4
+  - accion: 14
+    prefab: {fileID: 6126188424833946103, guid: a58aa9a78f2b45b45bb0f3e2e1e3ad3c, type: 3}
+    usarObjetivo: 1
+    seguirPuntoDeAparicion: 1
+    desplazamiento: {x: 0, y: 0, z: 0}
+    rotacionEuler: {x: 0, y: 0, z: 0}
+    duracionSegundos: 1
+  - accion: 15
+    prefab: {fileID: 0}
+    usarObjetivo: 0
+    seguirPuntoDeAparicion: 0
+    desplazamiento: {x: 0, y: 0, z: 0}
+    rotacionEuler: {x: 0, y: 0, z: 0}
+    duracionSegundos: 4
+  - accion: 16
+    prefab: {fileID: 3744133877081091469, guid: a2a060732547fe64581bb0cb3c2bdf1d, type: 3}
+    usarObjetivo: 1
+    seguirPuntoDeAparicion: 1
+    desplazamiento: {x: 0, y: 0, z: 0}
+    rotacionEuler: {x: 0, y: 0, z: 0}
+    duracionSegundos: 1

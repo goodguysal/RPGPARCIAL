@@ -82,7 +82,9 @@ public static class InstalarAnimacionesCura
             AnimationClip idle = PrepararClip(RutaIdle, true, false);
             AnimationClip smash = PrepararClip(RutaSmash, false, false);
             AnimationClip heal = PrepararClip(RutaHeal, false, false);
-            AnimationClip ataqueMagico = PrepararClip(RutaAtaqueMagico, false, false);
+            // Mantiene el root ligado a la altura de los pies durante Rayo sagrado,
+            // evitando que el retarget del movimiento lo empuje bajo el suelo.
+            AnimationClip ataqueMagico = PrepararClip(RutaAtaqueMagico, false, true);
             AnimationClip golpe = PrepararClipCompartido(RutaGolpe, false, false);
             AnimationClip muerte = PrepararClipCompartido(RutaMuerte, false, true);
             AnimatorController controller = CrearControlador(idle, smash, heal, ataqueMagico, golpe, muerte);

@@ -18,11 +18,18 @@ public sealed class EnemigoCombate : MonoBehaviour
     [Header("Decisiones")]
     [SerializeField, Range(0f, 1f)] private float probabilidadGolpeFuerte = 0.25f;
     [SerializeField, Range(0f, 1f)] private float probabilidadGolpeFuerteHerido = 0.55f;
+    [Header("VFX por acción")]
+    [SerializeField] private ConfiguracionVFXCombate configuracionVFX;
     [SerializeField] private AtaqueEnemigo[] ataques =
     {
         new AtaqueEnemigo("Zarpazo", 5, 8),
         new AtaqueEnemigo("Embate de turba", 8, 12)
     };
+
+    [Header("Sonidos")]
+    [SerializeField] private AudioClip sonidoAtaque;
+    [SerializeField] private AudioClip sonidoRecibirGolpe;
+    [SerializeField] private AudioClip sonidoMorir;
 
     public string Nombre => nombre;
     public int VidaMaxima => vidaMaxima;
@@ -52,16 +59,24 @@ public sealed class EnemigoCombate : MonoBehaviour
     private float multiplicadorATBPreparado = 1f;
 
     private Animator animator;
+    private AudioSource audioSource;
     private static readonly int AtaqueTrigger = Animator.StringToHash("Attack");
     private static readonly int GolpeTrigger = Animator.StringToHash("Hit");
     private static readonly int EstadoIdle = Animator.StringToHash("Base Layer.Idle");
 
-    private void Awake() => Reiniciar();
+    private void Awake()
+    {
+        audioSource = GetComponent<AudioSource>();
+        if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
+        audioSource.playOnAwake = false;
+        audioSource.spatialBlend = 0f;
+        Reiniciar();
+    }
 
     public void Reiniciar()
     {
         Vida = Mathf.Clamp(vidaInicial, 0, vidaMaxima);
-        Mana = Mathf.Clamp(manaInicial, 0, manaMaximo);
+        Mana = manaMaximo;
         ATB = 0f;
         DanoVeneno = 0;
         RondasVenenoRestantes = 0;
@@ -129,8 +144,17 @@ public sealed class EnemigoCombate : MonoBehaviour
     public void RecibirDano(int cantidad)
     {
         int dano = Mathf.Max(0, cantidad);
+        if (Vida <= 0 || dano <= 0) return;
         Vida = Mathf.Max(0, Vida - dano);
-        if (dano > 0) ActivarAnimacion(GolpeTrigger);
+        if (Vida == 0)
+        {
+            ReproducirSonido(sonidoMorir);
+        }
+        else
+        {
+            ReproducirSonido(sonidoRecibirGolpe);
+            ActivarAnimacion(GolpeTrigger);
+        }
     }
 
     /// <summary>Elige ataque y objetivo, pero reserva el daño para el momento del impacto.</summary>
@@ -190,6 +214,8 @@ public sealed class EnemigoCombate : MonoBehaviour
             objetivoForzadoProximoAtaque = null;
         Mana = Mathf.Max(0, Mana - accion.costoMana);
         ActivarAnimacion(AtaqueTrigger);
+        ReproducirSonido(sonidoAtaque);
+        ReproducirVFX(AccionVFXCombate.GolpeGolem, accion.objetivo.transform);
         if (accion.objetivo.BloquearYDevolverGolpe(accion.dano, out int danoDevuelto))
         {
             RecibirDano(danoDevuelto);
@@ -206,6 +232,31 @@ public sealed class EnemigoCombate : MonoBehaviour
         ObtenerAnimator();
         if (animator != null && animator.runtimeAnimatorController != null)
             animator.SetTrigger(trigger);
+    }
+
+    private void ReproducirSonido(AudioClip clip)
+    {
+        if (clip == null) return;
+        if (audioSource == null) audioSource = GetComponent<AudioSource>() ?? gameObject.AddComponent<AudioSource>();
+        audioSource.PlayOneShot(clip);
+    }
+
+    private void ReproducirVFX(AccionVFXCombate accion, Transform objetivo)
+    {
+        if (configuracionVFX == null) return;
+        VFXAccionCombate entrada = configuracionVFX.Buscar(accion);
+        if (entrada == null || entrada.prefab == null) return;
+        Transform punto = entrada.usarObjetivo && objetivo != null ? objetivo : transform;
+        Vector3 posicion = punto.TransformPoint(entrada.desplazamiento);
+        Quaternion rotacion = punto.rotation * Quaternion.Euler(entrada.rotacionEuler);
+        Transform padre = entrada.seguirPuntoDeAparicion ? punto : null;
+        GameObject instancia = Instantiate(entrada.prefab, posicion, rotacion, padre);
+        if (padre != null)
+        {
+            instancia.transform.localPosition = entrada.desplazamiento;
+            instancia.transform.localRotation = Quaternion.Euler(entrada.rotacionEuler);
+        }
+        if (entrada.duracionSegundos > 0f) Destroy(instancia, entrada.duracionSegundos);
     }
 
     private void ObtenerAnimator()

@@ -19,7 +19,7 @@ public sealed class CombateUIController : MonoBehaviour
     [SerializeField, Min(0.1f)] private float ventanaCancelarAccion = 0.65f;
     [SerializeField, Min(2f)] private float tiempoMaximoResolucion = 8f;
     [SerializeField] private int[] rondasAtaqueDoble = { 3, 5 };
-    private enum MenuActivo { Comandos, Ataques, AtaquesNormales, AtaquesMana, Inventario, ObjetivosMana, ObjetivosCuracionDoctor, ObjetivosEsenciaBestia }
+    private enum MenuActivo { Comandos, Ataques, AtaquesNormales, AtaquesMana, Inventario, ObjetivosMana, ObjetivosCuracionDoctor, ObjetivosEsenciaBestia, ObjetivosVenda, ObjetivosAceleradorATB }
 
     private PersonajeCombate personaje;
     private PersonajeCombate[] aliados = Array.Empty<PersonajeCombate>();
@@ -69,12 +69,15 @@ public sealed class CombateUIController : MonoBehaviour
     private Button botonSales;
     private Button botonVeneno;
     private Button botonEsenciaBestia;
+    private Button botonAceleradorATB;
     private Button botonVolverAtaques;
     private Button botonVolverInventario;
     private Button botonReiniciar;
 
     private readonly List<Button> botonesActivos = new List<Button>();
     private readonly List<Button> botonesObjetivoCuracionDoctor = new List<Button>();
+    private readonly List<Button> botonesObjetivoVenda = new List<Button>();
+    private readonly List<Button> botonesObjetivoAceleradorATB = new List<Button>();
     private MenuActivo menuActual = MenuActivo.Comandos;
     private int turno = 1;
     private int indiceAliadoActual;
@@ -91,6 +94,8 @@ public sealed class CombateUIController : MonoBehaviour
     private readonly List<string> historialAcciones = new List<string>();
     private readonly HashSet<PersonajeCombate> personajesDefendidos = new HashSet<PersonajeCombate>();
     private bool seleccionandoObjetivoCuracionDoctor;
+    private bool seleccionandoObjetivoVenda;
+    private bool seleccionandoObjetivoAceleradorATB;
 
     private void Awake()
     {
@@ -146,6 +151,8 @@ public sealed class CombateUIController : MonoBehaviour
             CrearBotonConsumible("BtnVeneno", new Vector2(492f, -160f), "VENENO", "-5 PV al final de las próximas 2 rondas · sin coste de PM/ATB");
         botonEsenciaBestia = Obtener<Button>("BattlePanel/ActionPanel/Inventory/BtnEsenciaBestia") ??
             CrearBotonConsumible("BtnEsenciaBestia", new Vector2(16f, -234f), "ESCENCIA DE BESTIA", "El próximo ataque del GOLEM apunta al aliado elegido");
+        botonAceleradorATB = Obtener<Button>("BattlePanel/ActionPanel/Inventory/BtnAceleradorATB") ??
+            CrearBotonConsumible("BtnAceleradorATB", new Vector2(492f, -234f), "ELIXIR DE CELERIDAD", "Acelera el ATB del aliado elegido durante 2 partidas");
         botonVolverInventario = Obtener<Button>("BattlePanel/ActionPanel/Inventory/BtnBackInventory");
         botonReiniciar = Obtener<Button>("EndPanel/BtnRestart");
 
@@ -373,12 +380,13 @@ public sealed class CombateUIController : MonoBehaviour
         Conectar(botonSales, UsarSalesDeCombate);
         Conectar(botonVeneno, UsarVenenoConsumible);
         Conectar(botonEsenciaBestia, AbrirObjetivosEsenciaBestia);
+        Conectar(botonAceleradorATB, AbrirObjetivosAceleradorATB);
         Conectar(botonVolverAtaques, MostrarComandos);
         Conectar(botonVolverInventario, MostrarComandos);
         Conectar(botonReiniciar, ReiniciarCombate);
 
         PrepararHover(botonTajo, botonEstocada,
-            botonChispa, botonPulso, botonVenda, botonTonico, botonSales, botonVeneno, botonEsenciaBestia,
+            botonChispa, botonPulso, botonVenda, botonTonico, botonSales, botonVeneno, botonEsenciaBestia, botonAceleradorATB,
             botonVolverAtaques, botonVolverInventario);
     }
 
@@ -427,6 +435,7 @@ public sealed class CombateUIController : MonoBehaviour
             case "BtnGuard": return "Defiende al personaje hasta el siguiente ataque enemigo que lo elija. Reduce ese impacto a la mitad y reproduce Outward Block. No consume ATB.";
             case "BtnVeneno": return $"La dosis suma {personaje?.DuracionVenenoRondas ?? 2} rondas completas de veneno. El GOLEM pierde {personaje?.DanoVenenoPorTurno ?? 5} PV al final de cada ronda. No consume PM ni ATB.";
             case "BtnEsenciaBestia": return "Elegí a quién atraerá el próximo ataque del GOLEM. Usarla sobre otro aliado cuesta 30 de recuperación ATB; sobre quien la usa no cuesta ATB.";
+            case "BtnAceleradorATB": return $"Se aplica al aliado elegido y aumenta su velocidad de ATB un {personaje?.PorcentajeAceleracionATBConsumible ?? 50}% durante 2 partidas. Recuperación ATB: 30.";
             case "BtnBackAttacks":
             case "BtnBackInventory": return "Cierra este submenú y vuelve a los comandos del personaje.";
         }
@@ -435,6 +444,10 @@ public sealed class CombateUIController : MonoBehaviour
             return $"CURA gasta {personaje.CostoRegenerarMana} PM para que el aliado elegido recupere hasta {personaje.CantidadRegenerarMana} PM y adelanta 20 ATB a ese aliado. Recuperación de CURA: 35 ATB.";
         if (menuActual == MenuActivo.ObjetivosCuracionDoctor && personaje != null && personaje.EsDoctor)
             return $"DOCTOR gasta {personaje.CostoCuracionDoctor} PM para recuperar hasta {personaje.CantidadCuracionDoctor} PV al aliado elegido. Recuperación de DOCTOR: 55 ATB.";
+        if (menuActual == MenuActivo.ObjetivosVenda)
+            return "Usa una venda del inventario de quien actúa para recuperar 14 PV del aliado elegido. Recuperación ATB: 30.";
+        if (menuActual == MenuActivo.ObjetivosAceleradorATB)
+            return $"Aumenta la velocidad de ATB del aliado elegido un {personaje?.PorcentajeAceleracionATBConsumible ?? 50}% durante {personaje?.DuracionAceleracionATBConsumiblePartidas ?? 2} partidas. Recuperación ATB: 30.";
 
         if (string.IsNullOrWhiteSpace(detalle))
         {
@@ -604,9 +617,110 @@ public sealed class CombateUIController : MonoBehaviour
         ActualizarIndicadorObjetivoCuracionDoctor();
     }
 
+    private void AbrirObjetivosVenda()
+    {
+        if (!PuedeActuar() || personaje == null || personaje.Vendas <= 0 ||
+            !aliados.Any(aliado => aliado != null && aliado.Vida > 0 && aliado.Vida < aliado.VidaMaxima)) return;
+
+        menuActual = MenuActivo.ObjetivosVenda;
+        seleccionandoObjetivoVenda = true;
+        botonesObjetivoVenda.Clear();
+        OcultarIndicadoresObjetivo();
+        ActivarMenu(menuAtaques);
+        if (tituloAtaquesTexto != null) tituloAtaquesTexto.text = "VENDA · ELEGIR ALIADO";
+        if (encabezadoNormalesTexto != null) encabezadoNormalesTexto.text = "ELIGE A QUIÉN CURAR";
+        if (encabezadoEspecialesTexto != null) encabezadoEspecialesTexto.text = string.Empty;
+
+        Button[] opciones = { botonTajo, botonEstocada, botonChispa, botonPulso };
+        int indice = 0;
+        List<Button> seleccionables = new List<Button>();
+        foreach (PersonajeCombate aliado in aliados)
+        {
+            if (aliado == null || aliado.Vida <= 0 || indice >= opciones.Length) continue;
+            Button boton = opciones[indice++];
+            boton.gameObject.SetActive(true);
+            int cura = Mathf.Min(14, aliado.VidaMaxima - aliado.Vida);
+            CambiarTextoBoton(boton, aliado.Nombre.ToUpperInvariant(), $"PV {aliado.Vida}/{aliado.VidaMaxima} · +{cura} PV");
+            boton.interactable = aliado.Vida < aliado.VidaMaxima;
+            Conectar(boton, () => AplicarVenda(aliado));
+            botonesObjetivoVenda.Add(boton);
+            seleccionables.Add(boton);
+        }
+        for (int i = indice; i < opciones.Length; i++) opciones[i].gameObject.SetActive(false);
+        CambiarTextoBoton(botonVolverAtaques, "VOLVER AL INVENTARIO", string.Empty);
+        Conectar(botonVolverAtaques, AbrirInventario);
+        seleccionables.Add(botonVolverAtaques);
+        ConfigurarSeleccion(seleccionables.ToArray());
+    }
+
+    private void AplicarVenda(PersonajeCombate objetivo)
+    {
+        if (!PuedeActuar() || personaje == null || objetivo == null || objetivo.Vida <= 0) return;
+        seleccionandoObjetivoVenda = false;
+        OcultarIndicadoresObjetivo();
+        IniciarResolucion(() => !personaje.UsarVenda(objetivo, out int curacion) ? string.Empty :
+            $"{personaje.Nombre} usa Venda amarga sobre {objetivo.Nombre} y recupera {curacion} PV.", 30f);
+    }
+
+    private void AbrirObjetivosAceleradorATB()
+    {
+        if (!PuedeActuar() || personaje == null || personaje.AceleradoresATB <= 0 ||
+            !aliados.Any(aliado => aliado != null && aliado.Vida > 0)) return;
+
+        menuActual = MenuActivo.ObjetivosAceleradorATB;
+        seleccionandoObjetivoAceleradorATB = true;
+        botonesObjetivoAceleradorATB.Clear();
+        OcultarIndicadoresObjetivo();
+        ActivarMenu(menuAtaques);
+        if (tituloAtaquesTexto != null) tituloAtaquesTexto.text = "ELIXIR DE CELERIDAD · ELEGIR ALIADO";
+        if (encabezadoNormalesTexto != null) encabezadoNormalesTexto.text = "AUMENTA SU VELOCIDAD DE ATB";
+        if (encabezadoEspecialesTexto != null)
+            encabezadoEspecialesTexto.text = $"+{personaje.PorcentajeAceleracionATBConsumible}% DURANTE {personaje.DuracionAceleracionATBConsumiblePartidas} PARTIDAS";
+
+        Button[] opciones = { botonTajo, botonEstocada, botonChispa, botonPulso };
+        int indice = 0;
+        List<Button> seleccionables = new List<Button>();
+        foreach (PersonajeCombate aliado in aliados)
+        {
+            if (aliado == null || aliado.Vida <= 0 || indice >= opciones.Length) continue;
+            Button boton = opciones[indice++];
+            boton.gameObject.SetActive(true);
+            CambiarTextoBoton(boton, aliado.Nombre.ToUpperInvariant(),
+                $"VEL ATB {aliado.VelocidadATB:0.#} → {aliado.VelocidadATB * (1f + personaje.PorcentajeAceleracionATBConsumible / 100f):0.#}");
+            boton.interactable = true;
+            Conectar(boton, () => AplicarAceleradorATB(aliado));
+            botonesObjetivoAceleradorATB.Add(boton);
+            seleccionables.Add(boton);
+        }
+        for (int i = indice; i < opciones.Length; i++) opciones[i].gameObject.SetActive(false);
+        CambiarTextoBoton(botonVolverAtaques, "VOLVER AL INVENTARIO", string.Empty);
+        Conectar(botonVolverAtaques, AbrirInventario);
+        seleccionables.Add(botonVolverAtaques);
+        ConfigurarSeleccion(seleccionables.ToArray());
+    }
+
+    private void AplicarAceleradorATB(PersonajeCombate objetivo)
+    {
+        if (!PuedeActuar() || personaje == null || objetivo == null || objetivo.Vida <= 0) return;
+        seleccionandoObjetivoAceleradorATB = false;
+        OcultarIndicadoresObjetivo();
+        IniciarResolucion(() =>
+        {
+            if (!personaje.UsarAceleradorATB(objetivo)) return string.Empty;
+            PersonajeCardUI ficha = fichasPersonaje.FirstOrDefault(f => f != null && f.Personaje == objetivo);
+            if (ficha != null) ficha.MostrarAvisoATB($"ATB +{personaje.PorcentajeAceleracionATBConsumible}% · {personaje.DuracionAceleracionATBConsumiblePartidas} PARTIDAS");
+            return $"{personaje.Nombre} usa Elixir de celeridad sobre {objetivo.Nombre}: velocidad ATB +{personaje.PorcentajeAceleracionATBConsumible}% durante {personaje.DuracionAceleracionATBConsumiblePartidas} partidas.";
+        }, 30f);
+    }
+
     private void LimpiarObjetivosCuracionDoctor()
     {
         botonesObjetivoCuracionDoctor.Clear();
+        OcultarIndicadoresObjetivo();
+    }
+
+    private void OcultarIndicadoresObjetivo()
+    {
         if (fichasPersonaje == null) return;
         foreach (PersonajeCardUI ficha in fichasPersonaje)
             if (ficha != null) ficha.MostrarIndicadorObjetivo(false);
@@ -625,14 +739,15 @@ public sealed class CombateUIController : MonoBehaviour
     private void ActualizarIndicadorObjetivoCuracionDoctor()
     {
         if (fichasPersonaje == null) return;
-        foreach (PersonajeCardUI ficha in fichasPersonaje)
-            if (ficha != null) ficha.MostrarIndicadorObjetivo(false);
+        OcultarIndicadoresObjetivo();
+        if ((!seleccionandoObjetivoCuracionDoctor && !seleccionandoObjetivoVenda && !seleccionandoObjetivoAceleradorATB) ||
+            botonesActivos.Count == 0 || indiceSeleccionado < 0 || indiceSeleccionado >= botonesActivos.Count) return;
 
-        if (!seleccionandoObjetivoCuracionDoctor || botonesActivos.Count == 0 ||
-            indiceSeleccionado < 0 || indiceSeleccionado >= botonesActivos.Count) return;
-
-        int indiceObjetivo = botonesObjetivoCuracionDoctor.IndexOf(botonesActivos[indiceSeleccionado]);
-        if (indiceObjetivo < 0 || indiceObjetivo >= aliados.Length) return;
+        List<Button> botonesObjetivo = seleccionandoObjetivoCuracionDoctor
+            ? botonesObjetivoCuracionDoctor
+            : seleccionandoObjetivoVenda ? botonesObjetivoVenda : botonesObjetivoAceleradorATB;
+        int indiceObjetivo = botonesObjetivo.IndexOf(botonesActivos[indiceSeleccionado]);
+        if (indiceObjetivo < 0) return;
         PersonajeCombate objetivo = aliados.Where(a => a != null && a.Vida > 0).ElementAtOrDefault(indiceObjetivo);
         if (objetivo == null) return;
         PersonajeCardUI fichaObjetivo = fichasPersonaje.FirstOrDefault(f => f != null && f.Personaje == objetivo);
@@ -773,7 +888,7 @@ public sealed class CombateUIController : MonoBehaviour
         menuActual = MenuActivo.Inventario;
         ActivarMenu(menuInventario);
         ActualizarDisponibilidad();
-        ConfigurarSeleccion(botonVenda, botonTonico, botonSales, botonVeneno, botonEsenciaBestia, botonVolverInventario);
+        ConfigurarSeleccion(botonVenda, botonTonico, botonSales, botonVeneno, botonEsenciaBestia, botonAceleradorATB, botonVolverInventario);
     }
 
     private void AbrirObjetivosEsenciaBestia()
@@ -818,6 +933,18 @@ public sealed class CombateUIController : MonoBehaviour
             seleccionandoObjetivoCuracionDoctor = false;
             ActualizarIndicadorObjetivoCuracionDoctor();
         }
+        bool limpiarIndicadoresObjetivo = false;
+        if (menuActual != MenuActivo.ObjetivosVenda && seleccionandoObjetivoVenda)
+        {
+            seleccionandoObjetivoVenda = false;
+            limpiarIndicadoresObjetivo = true;
+        }
+        if (menuActual != MenuActivo.ObjetivosAceleradorATB && seleccionandoObjetivoAceleradorATB)
+        {
+            seleccionandoObjetivoAceleradorATB = false;
+            limpiarIndicadoresObjetivo = true;
+        }
+        if (limpiarIndicadoresObjetivo) OcultarIndicadoresObjetivo();
         bool mostrarComandos = menu != null && menu == menuComandos;
         bool mostrarAtaques = menu != null && menu == menuAtaques;
         bool mostrarInventario = menu != null && menu == menuInventario;
@@ -888,7 +1015,7 @@ public sealed class CombateUIController : MonoBehaviour
         if (!PuedeActuar() || enemigo == null || enemigo.Vida <= 0 || !personaje.PuedeUsarAtaque(tipo)) return;
         IniciarResolucion(() =>
         {
-            if (!personaje.UsarAtaque(tipo, out int dano)) return string.Empty;
+            if (!personaje.UsarAtaque(tipo, out int dano, enemigo.transform)) return string.Empty;
             enemigo.RecibirDano(dano);
             string accion = $"{personaje.Nombre} usa {nombreAtaque}: {dano} de daño.";
             if (tipo == TipoAtaque.GolpeImpulsor)
@@ -925,7 +1052,7 @@ public sealed class CombateUIController : MonoBehaviour
         ActivarMenu(null);
         IniciarResolucion(() =>
         {
-            if (!personaje.UsarEsenciaBestia()) return string.Empty;
+            if (!personaje.UsarEsenciaBestia(objetivo.transform)) return string.Empty;
             enemigo.ForzarProximoObjetivo(objetivo);
             return $"{personaje.Nombre} usa Escencia de bestia sobre {objetivo.Nombre}: el próximo ataque del GOLEM lo tendrá como objetivo" +
                 (sobreSiMismo ? ". No consume ATB." : ". Recuperación ATB: 30.");
@@ -933,8 +1060,7 @@ public sealed class CombateUIController : MonoBehaviour
     }
     private void UsarVenda()
     {
-        if (!PuedeActuar() || personaje.Vendas <= 0 || personaje.Vida >= personaje.VidaMaxima) return;
-        IniciarResolucion(() => !personaje.UsarVenda(out int curacion) ? string.Empty : $"{personaje.Nombre} usa Venda amarga y recupera {curacion} PV.", 30f);
+        AbrirObjetivosVenda();
     }
 
     private void UsarTonico()
@@ -1198,7 +1324,7 @@ public sealed class CombateUIController : MonoBehaviour
         {
             botonAtacar, botonInventario, botonDefenderse,
             botonTajo, botonEstocada, botonChispa, botonPulso, botonVolverAtaques,
-            botonVenda, botonTonico, botonSales, botonVeneno, botonEsenciaBestia, botonVolverInventario, botonReiniciar
+            botonVenda, botonTonico, botonSales, botonVeneno, botonEsenciaBestia, botonAceleradorATB, botonVolverInventario, botonReiniciar
         };
         foreach (Button boton in botones)
             if (boton != null) boton.interactable = true;
@@ -1214,16 +1340,26 @@ public sealed class CombateUIController : MonoBehaviour
             : personaje.EsDoctor ? personaje.Mana >= personaje.CostoImpulsoMana : personaje.Mana >= 6);
         if (botonPulso != null) botonPulso.interactable = personaje != null &&
             (personaje.EsDoctor ? personaje.Mana >= personaje.CostoCuracionDoctor : !personaje.EsCura && personaje.Mana >= 10);
-        if (botonVenda != null) botonVenda.interactable = personaje != null && personaje.Vendas > 0 && personaje.Vida < personaje.VidaMaxima;
+        if (botonVenda != null) botonVenda.interactable = personaje != null && personaje.Vendas > 0 && aliados.Any(a => a != null && a.Vida > 0 && a.Vida < a.VidaMaxima);
         if (botonTonico != null) botonTonico.interactable = personaje != null && personaje.Tonicos > 0 && personaje.Mana < personaje.ManaMaximo;
         if (botonSales != null) botonSales.interactable = personaje != null && personaje.Sales > 0;
         if (botonVeneno != null) botonVeneno.interactable = personaje != null && personaje.Venenos > 0 && enemigo != null && enemigo.Vida > 0;
         if (botonEsenciaBestia != null) botonEsenciaBestia.interactable = personaje != null && personaje.EsenciasBestia > 0 && enemigo != null && enemigo.Vida > 0;
-        ActualizarDetalle(botonVenda, personaje != null ? $"Recupera 14 PV · QUEDAN {personaje.Vendas} · ATB 30" : string.Empty);
-        ActualizarDetalle(botonTonico, personaje != null ? $"Recupera 8 PM · QUEDAN {personaje.Tonicos} · ATB 28 · +12 ATB" : string.Empty);
-        ActualizarDetalle(botonSales, personaje != null ? $"Daño +{personaje.PorcentajeBuffSales:P0} durante {personaje.DuracionSalesAtaques} ataques · QUEDAN {personaje.Sales} · ATB 32" : string.Empty);
-        ActualizarDetalle(botonVeneno, personaje != null ? $"Añade {personaje.DuracionVenenoRondas} rondas de -{personaje.DanoVenenoPorTurno} PV al final de cada ronda · QUEDAN {personaje.Venenos} · 0 PM · 0 ATB" : string.Empty);
-        ActualizarDetalle(botonEsenciaBestia, personaje != null ? $"El próximo ataque del GOLEM apunta al aliado elegido · QUEDAN {personaje.EsenciasBestia} · en uno mismo: 0 ATB; en otro: ATB 30" : string.Empty);
+        if (botonAceleradorATB != null) botonAceleradorATB.interactable = personaje != null && personaje.AceleradoresATB > 0 && aliados.Any(a => a != null && a.Vida > 0);
+        ActualizarTituloConsumible(botonVenda, "VENDA", personaje != null ? personaje.Vendas : 0);
+        ActualizarTituloConsumible(botonTonico, "TÓNICO", personaje != null ? personaje.Tonicos : 0);
+        ActualizarTituloConsumible(botonSales, "SALES DE COMBATE", personaje != null ? personaje.Sales : 0);
+        ActualizarTituloConsumible(botonVeneno, "VENENO", personaje != null ? personaje.Venenos : 0);
+        ActualizarTituloConsumible(botonEsenciaBestia, "ESCENCIA DE BESTIA", personaje != null ? personaje.EsenciasBestia : 0);
+        ActualizarTituloConsumible(botonAceleradorATB, "ELIXIR DE CELERIDAD", personaje != null ? personaje.AceleradoresATB : 0);
+        ActualizarDetalle(botonVenda, "Recupera 14 PV · ATB 30");
+        ActualizarDetalle(botonTonico, "Recupera 8 PM · ATB 28 · +12 ATB");
+        ActualizarDetalle(botonSales, personaje != null ? $"Daño +{personaje.PorcentajeBuffSales:P0} durante {personaje.DuracionSalesAtaques} ataques · ATB 32" : string.Empty);
+        ActualizarDetalle(botonVeneno, personaje != null ? $"Añade {personaje.DuracionVenenoRondas} rondas de -{personaje.DanoVenenoPorTurno} PV al final de cada ronda · 0 PM · 0 ATB" : string.Empty);
+        ActualizarDetalle(botonEsenciaBestia, "El próximo ataque del GOLEM apunta al aliado elegido · en uno mismo: 0 ATB; en otro: ATB 30");
+        ActualizarDetalle(botonAceleradorATB, personaje != null
+            ? $"Aumenta la velocidad ATB +{personaje.PorcentajeAceleracionATBConsumible}% durante {personaje.DuracionAceleracionATBConsumiblePartidas} partidas · ATB 30"
+            : string.Empty);
         if (personaje != null && personaje.EsDoctor)
             ActualizarDetalle(botonPulso, $"{personaje.CostoCuracionDoctor} PM · recupera hasta {personaje.CantidadCuracionDoctor} PV · ATB 55");
     }
@@ -1232,6 +1368,12 @@ public sealed class CombateUIController : MonoBehaviour
     {
         TMP_Text detail = boton != null ? boton.transform.Find("Detail")?.GetComponent<TMP_Text>() : null;
         if (detail != null) detail.text = texto;
+    }
+
+    private static void ActualizarTituloConsumible(Button boton, string nombre, int cantidad)
+    {
+        TMP_Text label = boton != null ? boton.transform.Find("Label")?.GetComponent<TMP_Text>() : null;
+        if (label != null) label.text = $"{nombre} ({Mathf.Max(0, cantidad)})";
     }
 
     private Button CrearBotonConsumible(string nombre, Vector2 posicion, string titulo, string detalle)
@@ -1306,9 +1448,12 @@ public sealed class CombateUIController : MonoBehaviour
 
     private void TerminarCombate(bool victoria)
     {
+        if (combateTerminado) return;
         accionCancelable = false;
         ++idResolucion;
         combateTerminado = true;
+        foreach (PersonajeCombate aliado in aliados)
+            if (aliado != null) aliado.ConsumirPartidaAceleracionATB();
         turnoDeIren = false;
         resolviendoAcciones = false;
         corutinaResolucion = null;
@@ -1323,6 +1468,7 @@ public sealed class CombateUIController : MonoBehaviour
             mensajeFinalTexto.text = victoria ? mensajeVictoria : mensajeDerrota;
         EscribirRegistro(victoria ? "Fin del combate: victoria." : "Fin del combate: derrota.");
         if (panelFinal != null) panelFinal.SetActive(true);
+        ActualizarEstado();
         ConfigurarSeleccion(botonReiniciar);
     }
 
@@ -1366,6 +1512,8 @@ public sealed class CombateUIController : MonoBehaviour
     {
         aliados = FindObjectsOfType<PersonajeCombate>(true)
             .Where(a => a != null && a.isActiveAndEnabled && a.gameObject.scene == gameObject.scene)
+            .OrderBy(a => a.EsDoctor ? 0 : a.EsCura ? 1 : a.EsEsqueleto ? 2 : 3)
+            .ThenBy(a => a.Nombre)
             .ToArray();
         enemigo = FindObjectsOfType<EnemigoCombate>(true)
             .FirstOrDefault(e => e != null && e.isActiveAndEnabled && e.gameObject.scene == gameObject.scene);
